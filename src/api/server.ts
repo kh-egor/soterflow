@@ -1,0 +1,158 @@
+/**
+ * @module api/server
+ * Express API server for SoterFlow Telegram Mini App.
+ */
+
+import express from "express";
+import http from "node:http";
+import { WebSocketServer, WebSocket } from "ws";
+import type { WorkItem } from "../channels/base.js";
+import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
+import { getAllSyncStates } from "../store/sync.js";
+import { getAll, search, updateStatus } from "../store/workitems.js";
+import { authMiddleware, type AuthedRequest } from "./auth.js";
+
+export function createServer() {
+  const app = express();
+  const server = http.createServer(app);
+
+  // CORS
+  app.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+    if (_req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
+  app.use(express.json());
+  app.use(authMiddleware as any);
+
+  // --- Health ---
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true, data: { status: "running" } });
+  });
+
+  // --- Inbox ---
+  app.get("/api/inbox", (req, res) => {
+    try {
+      const { source, type, status, search: q } = req.query as Record<string, string>;
+      let items: WorkItem[];
+      if (q) {
+        items = search(q);
+      } else {
+        items = getInbox({ source, type, status });
+      }
+      res.json({ ok: true, data: items });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get("/api/inbox/:id", (req, res) => {
+    try {
+      const all = getAll();
+      const item = all.find((i) => i.id === req.params.id);
+      if (!item) {
+        res.status(404).json({ ok: false, error: "Not found" });
+        return;
+      }
+      res.json({ ok: true, data: item });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post("/api/inbox/:id/action", async (req, res) => {
+    try {
+      const { action, params } = req.body ?? {};
+      if (!action) {
+        res.status(400).json({ ok: false, error: "action required" });
+        return;
+      }
+
+      // Find the item to determine its source channel
+      const all = getAll();
+      const item = all.find((i) => i.id === req.params.id);
+      if (!item) {
+        res.status(404).json({ ok: false, error: "Not found" });
+        return;
+      }
+
+      // Simple built-in actions
+      if (["seen", "in_progress", "done", "dismissed"].includes(action)) {
+        updateStatus(item.id, action as WorkItem["status"]);
+        res.json({ ok: true, data: { id: item.id, status: action } });
+        return;
+      }
+
+      // Channel-specific action
+      const channels = createChannels();
+      const channel = channels.find((c) => c.name === item.source);
+      if (!channel) {
+        res.status(400).json({ ok: false, error: `No channel for source: ${item.source}` });
+        return;
+      }
+
+      await channel.connect();
+      await channel.performAction(item.id, action, params);
+      await channel.disconnect();
+
+      res.json({ ok: true, data: { id: item.id, action } });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // --- Sync ---
+  app.post("/api/sync", async (_req, res) => {
+    try {
+      const channels = createChannels();
+      const { stats } = await syncAll(channels);
+      broadcast(wss, { type: "sync_complete", stats });
+      res.json({ ok: true, data: stats });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get("/api/sync/status", (_req, res) => {
+    try {
+      const states = getAllSyncStates();
+      const configured = getConfiguredChannels();
+      res.json({ ok: true, data: { syncStates: states, channels: configured } });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // --- Config ---
+  app.get("/api/config/channels", (_req, res) => {
+    res.json({ ok: true, data: getConfiguredChannels() });
+  });
+
+  app.post("/api/config/channels", (_req, res) => {
+    // Placeholder — writing to .env is risky; just acknowledge for now
+    res.status(501).json({ ok: false, error: "Channel config update not yet implemented" });
+  });
+
+  // --- WebSocket ---
+  const wss = new WebSocketServer({ server, path: "/ws" });
+  wss.on("connection", (ws) => {
+    ws.send(JSON.stringify({ type: "connected" }));
+  });
+
+  return { app, server, wss };
+}
+
+function broadcast(wss: WebSocketServer, data: any) {
+  const msg = JSON.stringify(data);
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  }
+}
