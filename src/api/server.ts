@@ -10,7 +10,12 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkItem } from "../channels/base.js";
 import { Director } from "../agent/director.js";
-import { getInbox, syncAll, getConfiguredChannels } from "../agent/orchestrator.js";
+import {
+  getInbox,
+  syncAll,
+  getConfiguredChannels,
+  getCachedChannels,
+} from "../agent/orchestrator.js";
 import { env } from "../soterflow-env.js";
 import { getAllSyncStates } from "../store/sync.js";
 import { getAll, search, updateStatus } from "../store/workitems.js";
@@ -164,16 +169,18 @@ export function createServer() {
       }
 
       // Channel-specific action
-      const channels = createChannels();
+      const channels = getCachedChannels();
       const channel = channels.find((c) => c.name === item.source);
       if (!channel) {
         res.status(400).json({ ok: false, error: `No channel for source: ${item.source}` });
         return;
       }
 
-      await channel.connect();
+      if (!channel.isConnected()) {
+        await channel.connect();
+      }
       await channel.performAction(item.id, action, params);
-      await channel.disconnect();
+      // Don't disconnect cached channels — they're reused across syncs
 
       res.json({ ok: true, data: { id: item.id, action } });
     } catch (e: unknown) {

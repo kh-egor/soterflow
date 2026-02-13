@@ -47,11 +47,13 @@ export class JiraChannel extends BaseChannel {
 
     // Verify connectivity
     await this.request("/rest/api/3/myself");
+    this._connected = true;
   }
 
   async disconnect(): Promise<void> {
     this.baseUrl = "";
     this.auth = "";
+    this._connected = false;
   }
 
   private async request(path: string, options?: RequestInit): Promise<any> {

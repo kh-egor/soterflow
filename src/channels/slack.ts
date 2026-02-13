@@ -34,6 +34,7 @@ export class SlackChannel extends BaseChannel {
       await this.socketClient.start();
       console.log("[soterflow] Slack Socket Mode connected");
     }
+    this._connected = true;
   }
 
   async disconnect(): Promise<void> {
@@ -44,6 +45,7 @@ export class SlackChannel extends BaseChannel {
     this.client = null;
     this.userId = "";
     this.eventListeners = [];
+    this._connected = false;
   }
 
   /** Register a callback for real-time incoming work items */
@@ -240,40 +242,4 @@ export function mapSlackDM(msg: Record<string, unknown>, channelId: string): Wor
   };
 }
 
-/** Map a Slack mention search result to WorkItem */
-export function mapSlackMention(match: Record<string, unknown>): WorkItem {
-  const channel = match.channel as Record<string, unknown> | undefined;
-  const ts = match.ts as string;
-  return {
-    id: `slack-mention-${channel?.id}-${ts}`,
-    source: "slack",
-    type: "mention",
-    title: `Mention in #${(channel?.name as string) ?? "unknown"}`,
-    body: (match.text as string) ?? "",
-    author: (match.user as string) ?? (match.username as string) ?? "unknown",
-    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
-    priority: "high",
-    url: (match.permalink as string) ?? "",
-    metadata: { channel: channel?.id, ts },
-    status: "new",
-  };
-}
-
-/** Map a Slack starred message to WorkItem */
-export function mapSlackStar(star: Record<string, unknown>): WorkItem {
-  const msg = star.message as Record<string, unknown> | undefined;
-  const ts = msg?.ts as string;
-  return {
-    id: `slack-star-${star.channel}-${ts}`,
-    source: "slack",
-    type: "message",
-    title: `Starred message in ${star.channel}`,
-    body: (msg?.text as string) ?? "",
-    author: (msg?.user as string) ?? "unknown",
-    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
-    priority: "normal",
-    url: (msg?.permalink as string) ?? "",
-    metadata: { channel: star.channel, ts, starred: true },
-    status: "new",
-  };
-}
+// mapSlackMention and mapSlackStar removed — Socket Mode handles real-time events

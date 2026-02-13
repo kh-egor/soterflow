@@ -34,6 +34,7 @@ export class GmailChannel extends BaseChannel {
     });
 
     await this.client.connect();
+    this._connected = true;
   }
 
   async disconnect(): Promise<void> {
@@ -45,6 +46,7 @@ export class GmailChannel extends BaseChannel {
       }
       this.client = null;
     }
+    this._connected = false;
   }
 
   async sync(): Promise<WorkItem[]> {

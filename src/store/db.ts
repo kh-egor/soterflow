@@ -68,6 +68,22 @@ function runMigrations(db: Database.Database): void {
       content_rowid=rowid
     );
 
+    -- FTS sync triggers (auto-update index on insert/update/delete)
+    CREATE TRIGGER IF NOT EXISTS workitems_ai AFTER INSERT ON workitems BEGIN
+      INSERT INTO workitems_fts(rowid, id, title, body, author)
+      VALUES (new.rowid, new.id, new.title, new.body, new.author);
+    END;
+    CREATE TRIGGER IF NOT EXISTS workitems_ad AFTER DELETE ON workitems BEGIN
+      INSERT INTO workitems_fts(workitems_fts, rowid, id, title, body, author)
+      VALUES('delete', old.rowid, old.id, old.title, old.body, old.author);
+    END;
+    CREATE TRIGGER IF NOT EXISTS workitems_au AFTER UPDATE ON workitems BEGIN
+      INSERT INTO workitems_fts(workitems_fts, rowid, id, title, body, author)
+      VALUES('delete', old.rowid, old.id, old.title, old.body, old.author);
+      INSERT INTO workitems_fts(rowid, id, title, body, author)
+      VALUES (new.rowid, new.id, new.title, new.body, new.author);
+    END;
+
     CREATE TABLE IF NOT EXISTS sync_state (
       channel_name TEXT PRIMARY KEY,
       last_sync TEXT NOT NULL,

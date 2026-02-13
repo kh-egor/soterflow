@@ -23,11 +23,13 @@ export class GitHubChannel extends BaseChannel {
     this.octokit = new Octokit({ auth: token });
     const { data } = await this.octokit.users.getAuthenticated();
     this.username = data.login;
+    this._connected = true;
   }
 
   async disconnect(): Promise<void> {
     this.octokit = null;
     this.username = "";
+    this._connected = false;
   }
 
   /** Retry wrapper with exponential backoff and rate-limit awareness. */

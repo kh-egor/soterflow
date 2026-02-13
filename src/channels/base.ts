@@ -26,6 +26,14 @@ export abstract class BaseChannel {
   /** Unique name identifying this channel (e.g. 'github', 'jira'). */
   abstract name: string;
 
+  /** Whether the channel is currently connected. */
+  protected _connected = false;
+
+  /** Check if channel is connected. */
+  isConnected(): boolean {
+    return this._connected;
+  }
+
   /** Establish connection / authenticate with the external service. */
   abstract connect(): Promise<void>;
 

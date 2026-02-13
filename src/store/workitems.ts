@@ -45,25 +45,7 @@ export function upsert(item: WorkItem): void {
     JSON.stringify(item.metadata),
     item.status,
   );
-
-  // Update FTS index — rebuild for this row
-  const row = db.prepare("SELECT rowid FROM workitems WHERE id = ?").get(item.id) as
-    | { rowid: number }
-    | undefined;
-  if (row) {
-    // Try to delete old FTS entry (ignore errors for new rows)
-    try {
-      db.prepare(`
-        INSERT INTO workitems_fts(workitems_fts, rowid, id, title, body, author)
-        VALUES('delete', ?, ?, ?, ?, ?)
-      `).run(row.rowid, item.id, item.title, item.body, item.author);
-    } catch {}
-
-    db.prepare(`
-      INSERT INTO workitems_fts(rowid, id, title, body, author)
-      VALUES(?, ?, ?, ?, ?)
-    `).run(row.rowid, item.id, item.title, item.body, item.author);
-  }
+  // FTS index is updated automatically via SQL triggers (see db.ts)
 }
 
 /**

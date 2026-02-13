@@ -113,7 +113,9 @@ async function _syncAllInner(
       // 60s timeout per channel to prevent hanging (gmail IMAP needs more time)
       const syncWithTimeout = async () => {
         console.log(`[soterflow] Syncing ${channel.name}...`);
-        await channel.connect();
+        if (!channel.isConnected()) {
+          await channel.connect();
+        }
         console.log(`[soterflow] ${channel.name} connected, fetching items...`);
         const items = await channel.sync();
         console.log(`[soterflow] ${channel.name} synced: ${items.length} items`);
@@ -260,8 +262,7 @@ export function applyPriorityHeuristics(item: WorkItem): void {
     item.priority = "urgent";
   }
 
-  // Age-based escalation on ingest too
-  applyAgeEscalation(item);
+  // Age escalation is applied at read time only (getInbox), not persisted
 }
 
 /**
