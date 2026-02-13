@@ -3,46 +3,51 @@
  * Orchestrates syncing across all channels, applies priority heuristics, and returns a sorted inbox.
  */
 
-import { BaseChannel, WorkItem } from "../channels/base";
-import { updateSyncState } from "../store/sync";
-import { upsert, getAll } from "../store/workitems";
+import { BaseChannel, WorkItem } from "../channels/base.js";
+import { GitHubChannel } from "../channels/github.js";
+import { JiraChannel } from "../channels/jira.js";
+import { SlackChannel } from "../channels/slack.js";
+import { env } from "../soterflow-env.js";
+import { updateSyncState } from "../store/sync.js";
+import { upsert, getAll } from "../store/workitems.js";
 
-/**
- * Run a full sync across all registered channels, store results, and return sorted items.
- * @param channels - Array of channel instances (already connected)
- * @returns Sorted work items, highest priority first
- */
-export async function syncAll(channels: BaseChannel[]): Promise<WorkItem[]> {
-  for (const channel of channels) {
-    try {
-      const items = await channel.sync();
-      for (const item of items) {
-        applyPriorityHeuristics(item);
-        upsert(item);
-      }
-      updateSyncState(channel.name);
-    } catch (err) {
-      console.error(`[soterflow] Failed to sync ${channel.name}:`, err);
-    }
-  }
-
-  return getInbox();
+/** Stats from a sync run. */
+export interface SyncStats {
+  totalItems: number;
+  newItems: number;
+  duplicatesSkipped: number;
+  perSource: Record<string, { total: number; new: number }>;
 }
 
 /**
- * Get the current inbox: all non-dismissed/done items, sorted by priority then recency.
+ * Create channel instances based on which env vars are configured.
+ * Only instantiates connectors that have the required tokens set.
  */
-export function getInbox(): WorkItem[] {
-  const items = getAll();
-  return items
-    .filter((i) => i.status !== "done" && i.status !== "dismissed")
-    .toSorted((a, b) => {
-      const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-      if (pd !== 0) {
-        return pd;
-      }
-      return b.timestamp.getTime() - a.timestamp.getTime();
-    });
+export function createChannels(): BaseChannel[] {
+  const channels: BaseChannel[] = [];
+
+  if (env.GITHUB_TOKEN) {
+    channels.push(new GitHubChannel());
+  }
+  if (env.JIRA_URL && env.JIRA_EMAIL && env.JIRA_TOKEN) {
+    channels.push(new JiraChannel());
+  }
+  if (env.SLACK_TOKEN) {
+    channels.push(new SlackChannel());
+  }
+
+  return channels;
+}
+
+/**
+ * Get info about which channels are configured.
+ */
+export function getConfiguredChannels(): Array<{ name: string; configured: boolean }> {
+  return [
+    { name: "github", configured: !!env.GITHUB_TOKEN },
+    { name: "jira", configured: !!(env.JIRA_URL && env.JIRA_EMAIL && env.JIRA_TOKEN) },
+    { name: "slack", configured: !!env.SLACK_TOKEN },
+  ];
 }
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -53,13 +58,132 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 /**
- * Apply heuristic rules to auto-assign priority.
- * - PR reviews → high
- * - Mentions → high
- * - DMs → high
- * - Notifications → normal
+ * Run a full sync across all registered channels, store results, and return sorted items.
+ * @param channels - Array of channel instances (already connected)
+ * @returns Object with sorted work items and sync stats
  */
-function applyPriorityHeuristics(item: WorkItem): void {
+export async function syncAll(
+  channels: BaseChannel[],
+): Promise<{ items: WorkItem[]; stats: SyncStats }> {
+  const stats: SyncStats = {
+    totalItems: 0,
+    newItems: 0,
+    duplicatesSkipped: 0,
+    perSource: {},
+  };
+
+  // Collect all items first for cross-channel dedup
+  const allNewItems: WorkItem[] = [];
+
+  for (const channel of channels) {
+    const sourceStat = { total: 0, new: 0 };
+    stats.perSource[channel.name] = sourceStat;
+
+    try {
+      await channel.connect();
+      const items = await channel.sync();
+      sourceStat.total = items.length;
+
+      for (const item of items) {
+        allNewItems.push(item);
+      }
+
+      updateSyncState(channel.name);
+      await channel.disconnect();
+    } catch (err) {
+      console.error(`[soterflow] Failed to sync ${channel.name}:`, err);
+    }
+  }
+
+  // Deduplicate by URL across channels (same URL = same item, keep highest priority)
+  const deduped = deduplicateItems(allNewItems);
+  stats.duplicatesSkipped = allNewItems.length - deduped.length;
+  stats.totalItems = deduped.length;
+
+  // Get existing IDs to count new items
+  const existingItems = new Set(getAll().map((i) => i.id));
+
+  for (const item of deduped) {
+    applyPriorityHeuristics(item);
+    upsert(item);
+
+    if (!existingItems.has(item.id)) {
+      stats.newItems++;
+      const sourceStat = stats.perSource[item.source];
+      if (sourceStat) {
+        sourceStat.new++;
+      }
+    }
+  }
+
+  return { items: getInbox(), stats };
+}
+
+/**
+ * Deduplicate items by URL. When multiple items share the same URL,
+ * keep the one with the highest priority (lowest PRIORITY_ORDER value).
+ */
+export function deduplicateItems(items: WorkItem[]): WorkItem[] {
+  const byUrl = new Map<string, WorkItem>();
+  const noUrl: WorkItem[] = [];
+
+  for (const item of items) {
+    if (!item.url) {
+      noUrl.push(item);
+      continue;
+    }
+
+    const existing = byUrl.get(item.url);
+    if (!existing) {
+      byUrl.set(item.url, item);
+    } else {
+      // Keep the one with higher priority
+      const existingOrder = PRIORITY_ORDER[existing.priority] ?? 2;
+      const newOrder = PRIORITY_ORDER[item.priority] ?? 2;
+      if (newOrder < existingOrder) {
+        byUrl.set(item.url, item);
+      }
+    }
+  }
+
+  return [...byUrl.values(), ...noUrl];
+}
+
+/**
+ * Get the current inbox: all non-dismissed/done items, sorted by priority then recency.
+ */
+export function getInbox(filters?: {
+  source?: string;
+  type?: string;
+  status?: string;
+}): WorkItem[] {
+  const items = getAll(filters);
+  return items
+    .filter((i) => {
+      if (filters?.status) {
+        return true;
+      } // already filtered by DB
+      return i.status !== "done" && i.status !== "dismissed";
+    })
+    .map((item) => {
+      // Apply age-based escalation for display (don't persist)
+      const escalated = { ...item };
+      applyAgeEscalation(escalated);
+      return escalated;
+    })
+    .toSorted((a, b) => {
+      const pd = (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2);
+      if (pd !== 0) {
+        return pd;
+      }
+      return b.timestamp.getTime() - a.timestamp.getTime();
+    });
+}
+
+/**
+ * Apply heuristic rules to auto-assign priority.
+ */
+export function applyPriorityHeuristics(item: WorkItem): void {
   if (item.type === "pr") {
     item.priority = "high";
   }
@@ -70,10 +194,26 @@ function applyPriorityHeuristics(item: WorkItem): void {
     item.priority = "high";
   }
 
-  // Jira blocker/highest already mapped by connector; leave as-is
-  // Escalate if title contains urgent keywords
   const urgentKeywords = /\b(urgent|critical|hotfix|p0|sev[- ]?0|outage|down)\b/i;
   if (urgentKeywords.test(item.title) || urgentKeywords.test(item.body)) {
     item.priority = "urgent";
+  }
+
+  // Age-based escalation on ingest too
+  applyAgeEscalation(item);
+}
+
+/**
+ * Escalate priority for items older than 24 hours.
+ * normal → high after 24h, high → urgent after 48h
+ */
+export function applyAgeEscalation(item: WorkItem): void {
+  const ageMs = Date.now() - item.timestamp.getTime();
+  const ageHours = ageMs / (1000 * 60 * 60);
+
+  if (ageHours > 48 && item.priority === "high") {
+    item.priority = "urgent";
+  } else if (ageHours > 24 && item.priority === "normal") {
+    item.priority = "high";
   }
 }

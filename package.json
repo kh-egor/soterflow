@@ -6,7 +6,8 @@
   "license": "MIT",
   "author": "",
   "bin": {
-    "openclaw": "openclaw.mjs"
+    "openclaw": "openclaw.mjs",
+    "soterflow": "src/cli/soterflow-cli.ts"
   },
   "files": [
     "CHANGELOG.md",
