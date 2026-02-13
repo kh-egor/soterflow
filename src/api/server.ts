@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkItem } from "../channels/base.js";
 import { Director } from "../agent/director.js";
-import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
+import { getInbox, syncAll, getConfiguredChannels } from "../agent/orchestrator.js";
 import { env } from "../soterflow-env.js";
 import { getAllSyncStates } from "../store/sync.js";
 import { getAll, search, updateStatus } from "../store/workitems.js";
@@ -185,8 +185,7 @@ export function createServer() {
   // --- Sync ---
   app.post("/api/sync", async (_req, res) => {
     try {
-      const channels = createChannels();
-      const { stats } = await syncAll(channels);
+      const { stats } = await syncAll();
       broadcast(wss, { type: "sync_complete", stats });
       res.json({ ok: true, data: stats });
     } catch (e: unknown) {

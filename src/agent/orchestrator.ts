@@ -68,7 +68,31 @@ const PRIORITY_ORDER: Record<string, number> = {
  * @param channels - Array of channel instances (already connected)
  * @returns Object with sorted work items and sync stats
  */
+let _syncing = false;
+let _cachedChannels: BaseChannel[] | null = null;
+
+export function getCachedChannels(): BaseChannel[] {
+  if (!_cachedChannels) {
+    _cachedChannels = createChannels();
+  }
+  return _cachedChannels;
+}
+
 export async function syncAll(
+  channels?: BaseChannel[],
+): Promise<{ items: WorkItem[]; stats: SyncStats }> {
+  if (_syncing) {
+    throw new Error("Sync already in progress");
+  }
+  _syncing = true;
+  try {
+    return await _syncAllInner(channels ?? getCachedChannels());
+  } finally {
+    _syncing = false;
+  }
+}
+
+async function _syncAllInner(
   channels: BaseChannel[],
 ): Promise<{ items: WorkItem[]; stats: SyncStats }> {
   const stats: SyncStats = {
@@ -86,17 +110,24 @@ export async function syncAll(
     stats.perSource[channel.name] = sourceStat;
 
     try {
-      // 30s timeout per channel to prevent hanging
+      // 60s timeout per channel to prevent hanging (gmail IMAP needs more time)
       const syncWithTimeout = async () => {
+        console.log(`[soterflow] Syncing ${channel.name}...`);
         await channel.connect();
+        console.log(`[soterflow] ${channel.name} connected, fetching items...`);
         const items = await channel.sync();
-        await channel.disconnect();
+        console.log(`[soterflow] ${channel.name} synced: ${items.length} items`);
+        // Don't disconnect cached channels — they'll be reused
+        // Only disconnect gmail (IMAP needs explicit close)
+        if (channel.name === "gmail") {
+          await channel.disconnect();
+        }
         return items;
       };
       const items = await Promise.race([
         syncWithTimeout(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`${channel.name} sync timed out after 30s`)), 30000),
+          setTimeout(() => reject(new Error(`${channel.name} sync timed out after 60s`)), 60000),
         ),
       ]);
       sourceStat.total = items.length;
@@ -122,6 +153,7 @@ export async function syncAll(
     }
   }
 
+  console.log(`[soterflow] All channels done. Total raw items: ${allNewItems.length}`);
   // Deduplicate by URL across channels (same URL = same item, keep highest priority)
   const deduped = deduplicateItems(allNewItems);
   stats.duplicatesSkipped = allNewItems.length - deduped.length;
@@ -130,6 +162,7 @@ export async function syncAll(
   // Get existing IDs to count new items
   const existingItems = new Set(getAll().map((i) => i.id));
 
+  console.log(`[soterflow] Deduped: ${deduped.length} items. Upserting...`);
   for (const item of deduped) {
     applyPriorityHeuristics(item);
     upsert(item);

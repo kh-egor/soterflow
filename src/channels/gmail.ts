@@ -8,7 +8,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser, ParsedMail } from "mailparser";
 import { BaseChannel, WorkItem } from "./base.js";
 
-const MAX_EMAILS = 50;
+const MAX_EMAILS = 20;
 
 export class GmailChannel extends BaseChannel {
   name = "gmail";
@@ -38,7 +38,11 @@ export class GmailChannel extends BaseChannel {
 
   async disconnect(): Promise<void> {
     if (this.client) {
-      await this.client.logout();
+      try {
+        this.client.close();
+      } catch {
+        /* ignore */
+      }
       this.client = null;
     }
   }
