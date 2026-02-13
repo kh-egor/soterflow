@@ -138,6 +138,14 @@ export class JiraChannel extends BaseChannel {
     return items;
   }
 
+  /** Get available transitions for a Jira issue. */
+  async getTransitions(issueKey: string): Promise<Array<{ id: string; name: string }>> {
+    const data = (await this.request(`/rest/api/3/issue/${issueKey}/transitions`)) as {
+      transitions: Array<{ id: string; name: string }>;
+    };
+    return data.transitions.map((t) => ({ id: t.id, name: t.name }));
+  }
+
   async performAction(
     itemId: string,
     action: string,

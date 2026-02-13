@@ -141,6 +141,35 @@ export function createServer() {
     }
   });
 
+  // Get available Jira transitions for an item
+  app.get("/api/inbox/:id/transitions", async (req, res) => {
+    try {
+      const all = getAll();
+      const item = all.find((i) => i.id === req.params.id);
+      if (!item || item.source !== "jira") {
+        res.status(404).json({ ok: false, error: "Jira item not found" });
+        return;
+      }
+      const key = (item.metadata.key as string) ?? req.params.id.replace("jira-", "");
+      const channels = getCachedChannels();
+      const jira = channels.find((c) => c.name === "jira");
+      if (!jira) {
+        res.status(400).json({ ok: false, error: "Jira channel not configured" });
+        return;
+      }
+      if (!jira.isConnected()) {
+        await jira.connect();
+      }
+      const transitions = await (jira as import("../channels/jira.js").JiraChannel).getTransitions(
+        key,
+      );
+      res.json({ ok: true, data: transitions });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
   app.post("/api/inbox/:id/action", async (req, res) => {
     try {
       const { action, params } = req.body ?? {};

@@ -632,11 +632,13 @@
         return parts.join(" · ");
       }
 
+      let currentDetailId = null;
+
       function showDetail(id) {
         const item = allItems.find((i) => i.id === id);
         if (!item) return;
+        currentDetailId = id;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
-        const actions = getActions(item);
         const statusInfo = getStatusInfo(item);
         const metaDetails = getMetaDetails(item);
         document.getElementById("detail-content").innerHTML = `
@@ -650,23 +652,32 @@
           ${metaDetails ? '<div style="font-size:13px;color:var(--hint);margin-bottom:8px">' + metaDetails + "</div>" : ""}
           <div class="detail-body">${esc(item.body || "")}</div>
           ${item.url ? '<a href="' + esc(item.url) + '" target="_blank" style="color:var(--link);font-size:13px;display:block;margin-bottom:16px">Open in ' + item.source + " →</a>" : ""}
-          <div class="detail-actions">
-            ${actions.map((a) => `<button class="action-btn${a.primary ? " primary" : ""}" onclick="doAction('${item.id}','${a.action}')">${a.label}</button>`).join("")}
+
+          <!-- Skills (source-specific actions) -->
+          <div id="skills-section" style="margin-bottom:12px">
+            <div style="font-size:13px;color:var(--hint);margin-bottom:8px">⚡ Actions</div>
+            <div id="skill-buttons"></div>
           </div>
 
-          <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.1);padding-top:14px">
-            <div style="font-size:13px;color:var(--hint);margin-bottom:6px">💬 Ask about this item</div>
+          <!-- Expandable panels for actions needing input -->
+          <div id="action-panel" style="display:none;margin-bottom:12px"></div>
+
+          <!-- Action feedback -->
+          <div id="action-status" style="font-size:12px;margin-bottom:12px;display:none"></div>
+
+          <!-- Free text prompt (always available) -->
+          <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:14px">
+            <div style="font-size:13px;color:var(--hint);margin-bottom:6px">💬 Ask anything about this item</div>
             <div style="display:flex;gap:8px">
-              <input id="prompt-input" type="text" placeholder="e.g. summarize, draft reply, check status..."
+              <input id="prompt-input" type="text" placeholder="e.g. summarize, draft reply, explain..."
                 style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--hint);background:var(--secondary-bg);color:var(--text);font-size:14px"
                 onkeydown="if(event.key==='Enter')sendPrompt('${item.id}')" />
-              <button class="action-btn primary" onclick="sendPrompt('${item.id}')" style="padding:10px 14px;white-space:nowrap">
-                Send ↗
-              </button>
+              <button class="action-btn primary" onclick="sendPrompt('${item.id}')" style="padding:10px 14px;white-space:nowrap">↗</button>
             </div>
             <div id="prompt-status" style="font-size:12px;color:var(--hint);margin-top:6px;display:none"></div>
           </div>
         `;
+        renderSkillButtons(item);
         showPage("detail");
         if (tg?.BackButton) {
           tg.BackButton.show();
@@ -677,32 +688,340 @@
         }
       }
 
-      function getActions(item) {
-        const a = [
-          { label: "✅ Done", action: "done", primary: true },
-          { label: "👁 Seen", action: "seen" },
-          { label: "🚫 Dismiss", action: "dismissed" },
-        ];
-        if (item.source === "github" && item.type === "pr") {
-          a.unshift({ label: "✅ Approve", action: "approve", primary: true });
-          a.unshift({ label: "🔀 Merge", action: "merge" });
-        }
-        if (item.source === "gmail") {
-          a.splice(1, 0, { label: "📖 Mark Read", action: "read" });
-          a.splice(2, 0, { label: "📂 Archive", action: "archive" });
-          a.splice(3, 0, { label: "⭐ Star", action: "star" });
-        }
-        return a;
+      function renderSkillButtons(item) {
+        const el = document.getElementById("skill-buttons");
+        const skills = getSkills(item);
+        el.innerHTML =
+          '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+          skills
+            .map((s) =>
+              s.needsInput
+                ? `<button class="action-btn${s.primary ? " primary" : ""}" onclick="showActionPanel('${item.id}','${s.action}','${esc(s.label)}')">${s.label}</button>`
+                : `<button class="action-btn${s.primary ? " primary" : ""}" onclick="doSkillAction('${item.id}','${s.action}',${s.params ? "'" + esc(JSON.stringify(s.params)) + "'" : "null"})">${s.label}</button>`,
+            )
+            .join("") +
+          "</div>";
+
+        // Load Jira transitions if applicable
+        if (item.source === "jira") loadJiraTransitions(item.id);
       }
 
-      async function doAction(id, action) {
+      function getSkills(item) {
+        const skills = [];
+
+        if (item.source === "github") {
+          if (item.type === "pr") {
+            skills.push({
+              label: "✅ Approve",
+              action: "approve",
+              primary: true,
+              needsInput: false,
+              params: {
+                owner: item.metadata?.repo?.split("/")[0],
+                repo: item.metadata?.repo?.split("/")[1],
+                number: item.metadata?.number,
+              },
+            });
+            skills.push({
+              label: "🔀 Merge",
+              action: "merge",
+              primary: true,
+              needsInput: false,
+              params: {
+                owner: item.metadata?.repo?.split("/")[0],
+                repo: item.metadata?.repo?.split("/")[1],
+                number: item.metadata?.number,
+              },
+            });
+          }
+          if (item.type === "issue" || item.type === "pr") {
+            skills.push({ label: "💬 Comment", action: "comment", needsInput: true });
+            skills.push({
+              label: "🔒 Close",
+              action: "close",
+              needsInput: false,
+              params: {
+                owner: item.metadata?.repo?.split("/")[0],
+                repo: item.metadata?.repo?.split("/")[1],
+                number: item.metadata?.number,
+              },
+            });
+          }
+        }
+
+        if (item.source === "jira") {
+          skills.push({ label: "🔄 Transition", action: "transition", needsInput: true });
+          skills.push({ label: "💬 Comment", action: "comment", needsInput: true });
+        }
+
+        if (item.source === "slack") {
+          skills.push({ label: "💬 Reply", action: "reply", needsInput: true });
+          skills.push({ label: "😀 React", action: "react", needsInput: true });
+        }
+
+        if (item.source === "gmail") {
+          skills.push({ label: "📖 Mark Read", action: "read", primary: true, needsInput: false });
+          skills.push({ label: "📂 Archive", action: "archive", needsInput: false });
+          skills.push({ label: "⭐ Star", action: "star", needsInput: false });
+        }
+
+        // Universal actions (lower priority)
+        skills.push({ label: "✅ Done", action: "done", needsInput: false });
+        skills.push({ label: "🚫 Dismiss", action: "dismissed", needsInput: false });
+
+        return skills;
+      }
+
+      function showActionPanel(itemId, action, label) {
+        const panel = document.getElementById("action-panel");
+        panel.style.display = "block";
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+
+        if (action === "transition") {
+          panel.innerHTML = `
+            <div class="settings-group">
+              <div style="font-size:13px;font-weight:600;margin-bottom:8px">🔄 Transition</div>
+              <div id="transitions-list" style="color:var(--hint);font-size:13px">Loading transitions...</div>
+            </div>
+          `;
+          return; // transitions loaded async by loadJiraTransitions
+        }
+
+        if (action === "comment") {
+          panel.innerHTML = `
+            <div class="settings-group">
+              <div style="font-size:13px;font-weight:600;margin-bottom:8px">💬 Comment</div>
+              <textarea id="action-text" rows="3" placeholder="Write a comment..."
+                style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--hint);background:var(--secondary-bg);color:var(--text);font-size:14px;resize:vertical"></textarea>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="action-btn primary" onclick="submitComment('${itemId}')">Send Comment</button>
+                <button class="action-btn" onclick="hideActionPanel()">Cancel</button>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (action === "reply") {
+          panel.innerHTML = `
+            <div class="settings-group">
+              <div style="font-size:13px;font-weight:600;margin-bottom:8px">💬 Reply</div>
+              <textarea id="action-text" rows="3" placeholder="Type your reply..."
+                style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--hint);background:var(--secondary-bg);color:var(--text);font-size:14px;resize:vertical"></textarea>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="action-btn primary" onclick="submitReply('${itemId}')">Send Reply</button>
+                <button class="action-btn" onclick="hideActionPanel()">Cancel</button>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        if (action === "react") {
+          const emojis = [
+            "👍",
+            "👎",
+            "❤️",
+            "🎉",
+            "👀",
+            "🚀",
+            "😄",
+            "🤔",
+            "+1",
+            "-1",
+            "white_check_mark",
+            "eyes",
+          ];
+          panel.innerHTML = `
+            <div class="settings-group">
+              <div style="font-size:13px;font-weight:600;margin-bottom:8px">😀 React</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                ${emojis.map((e) => `<button class="action-btn" onclick="submitReact('${itemId}','${e}')" style="font-size:18px;padding:8px 12px">${e.includes("_") ? ":" + e + ":" : e}</button>`).join("")}
+              </div>
+              <button class="action-btn" onclick="hideActionPanel()" style="margin-top:8px">Cancel</button>
+            </div>
+          `;
+          return;
+        }
+
+        panel.style.display = "none";
+      }
+
+      function hideActionPanel() {
+        document.getElementById("action-panel").style.display = "none";
+      }
+
+      async function loadJiraTransitions(itemId) {
+        try {
+          const r = await api("/api/inbox/" + itemId + "/transitions");
+          const el = document.getElementById("transitions-list");
+          if (!el) return;
+          if (r.ok && r.data.length) {
+            el.innerHTML =
+              '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+              r.data
+                .map(
+                  (t) =>
+                    `<button class="action-btn" onclick="submitTransition('${itemId}','${t.id}','${esc(t.name)}')">${esc(t.name)}</button>`,
+                )
+                .join("") +
+              '</div><button class="action-btn" onclick="hideActionPanel()" style="margin-top:8px">Cancel</button>';
+          } else {
+            el.textContent = "No transitions available";
+          }
+        } catch (e) {
+          const el = document.getElementById("transitions-list");
+          if (el) el.textContent = "Failed to load transitions";
+        }
+      }
+
+      function showActionStatus(msg, color) {
+        const el = document.getElementById("action-status");
+        el.style.display = "block";
+        el.style.color = color || "var(--hint)";
+        el.textContent = msg;
+        setTimeout(() => {
+          el.style.display = "none";
+        }, 3000);
+      }
+
+      async function doSkillAction(id, action, paramsJson) {
         if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        await api("/api/inbox/" + id + "/action", {
-          method: "POST",
-          body: JSON.stringify({ action }),
-        });
-        await loadInbox();
-        showPage("inbox");
+        showActionStatus("⏳ Running...", "var(--hint)");
+        try {
+          const params = paramsJson ? JSON.parse(paramsJson) : {};
+          const r = await api("/api/inbox/" + id + "/action", {
+            method: "POST",
+            body: JSON.stringify({ action, params }),
+          });
+          if (r.ok) {
+            showActionStatus("✅ " + action + " completed", "#4caf50");
+            await loadInbox();
+            // Refresh detail if still on it
+            if (currentDetailId === id) {
+              const item = allItems.find((i) => i.id === id);
+              if (!item) {
+                showPage("inbox");
+                return;
+              }
+              // Stay on detail, just refresh counts
+            }
+          } else {
+            showActionStatus("❌ " + (r.error || "Failed"), "#f44");
+          }
+        } catch (e) {
+          showActionStatus("❌ Error: " + e.message, "#f44");
+        }
+      }
+
+      async function submitComment(itemId) {
+        const text = document.getElementById("action-text").value.trim();
+        if (!text) return;
+        const item = allItems.find((i) => i.id === itemId);
+        if (!item) return;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        showActionStatus("⏳ Posting comment...", "var(--hint)");
+
+        const params = { body: text };
+        if (item.source === "github") {
+          const repo = (item.metadata?.repo || "").split("/");
+          params.owner = repo[0];
+          params.repo = repo[1];
+          params.number = item.metadata?.number;
+        }
+        if (item.source === "jira") {
+          params.key = item.metadata?.key;
+        }
+
+        try {
+          const r = await api("/api/inbox/" + itemId + "/action", {
+            method: "POST",
+            body: JSON.stringify({ action: "comment", params }),
+          });
+          if (r.ok) {
+            showActionStatus("✅ Comment posted", "#4caf50");
+            hideActionPanel();
+          } else {
+            showActionStatus("❌ " + (r.error || "Failed"), "#f44");
+          }
+        } catch (e) {
+          showActionStatus("❌ " + e.message, "#f44");
+        }
+      }
+
+      async function submitReply(itemId) {
+        const text = document.getElementById("action-text").value.trim();
+        if (!text) return;
+        const item = allItems.find((i) => i.id === itemId);
+        if (!item) return;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        showActionStatus("⏳ Sending reply...", "var(--hint)");
+
+        try {
+          const r = await api("/api/inbox/" + itemId + "/action", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "reply",
+              params: { text, channel: item.metadata?.channel, ts: item.metadata?.ts },
+            }),
+          });
+          if (r.ok) {
+            showActionStatus("✅ Reply sent", "#4caf50");
+            hideActionPanel();
+          } else {
+            showActionStatus("❌ " + (r.error || "Failed"), "#f44");
+          }
+        } catch (e) {
+          showActionStatus("❌ " + e.message, "#f44");
+        }
+      }
+
+      async function submitReact(itemId, emoji) {
+        const item = allItems.find((i) => i.id === itemId);
+        if (!item) return;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+        try {
+          const r = await api("/api/inbox/" + itemId + "/action", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "react",
+              params: { emoji, channel: item.metadata?.channel, ts: item.metadata?.ts },
+            }),
+          });
+          if (r.ok) {
+            showActionStatus("✅ Reacted with " + emoji, "#4caf50");
+            hideActionPanel();
+          } else {
+            showActionStatus("❌ " + (r.error || "Failed"), "#f44");
+          }
+        } catch (e) {
+          showActionStatus("❌ " + e.message, "#f44");
+        }
+      }
+
+      async function submitTransition(itemId, transitionId, name) {
+        const item = allItems.find((i) => i.id === itemId);
+        if (!item) return;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        showActionStatus("⏳ Transitioning to " + name + "...", "var(--hint)");
+        try {
+          const r = await api("/api/inbox/" + itemId + "/action", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "transition",
+              params: { transitionId, key: item.metadata?.key },
+            }),
+          });
+          if (r.ok) {
+            showActionStatus("✅ Moved to " + name, "#4caf50");
+            hideActionPanel();
+            await loadInbox();
+          } else {
+            showActionStatus("❌ " + (r.error || "Failed"), "#f44");
+          }
+        } catch (e) {
+          showActionStatus("❌ " + e.message, "#f44");
+        }
       }
 
       // --- Prompt ---
