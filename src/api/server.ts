@@ -5,6 +5,8 @@
 
 import express from "express";
 import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkItem } from "../channels/base.js";
 import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
@@ -29,7 +31,18 @@ export function createServer() {
   });
 
   app.use(express.json());
-  app.use(authMiddleware as express.RequestHandler);
+
+  // Serve static Mini App frontend
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  app.use(express.static(path.join(__dirname, "public")));
+
+  // Auth only for /api/* routes (except health)
+  app.use("/api", (req, res, next) => {
+    if (req.path === "/health") {
+      return next();
+    }
+    return (authMiddleware as express.RequestHandler)(req, res, next);
+  });
 
   // --- Health ---
   app.get("/api/health", (_req, res) => {
