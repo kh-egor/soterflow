@@ -662,7 +662,13 @@
           <!-- Expandable panels for actions needing input -->
           <div id="action-panel" style="display:none;margin-bottom:12px"></div>
 
-          <!-- Action feedback -->
+          <!-- Live progress feed -->
+          <div id="progress-feed" style="display:none;margin-bottom:12px;background:var(--secondary-bg);border-radius:10px;padding:10px;max-height:200px;overflow-y:auto">
+            <div style="font-size:11px;color:var(--hint);margin-bottom:6px;font-weight:600">📡 Progress</div>
+            <div id="progress-items"></div>
+          </div>
+
+          <!-- Action feedback (legacy) -->
           <div id="action-status" style="font-size:12px;margin-bottom:12px;display:none"></div>
 
           <!-- Free text prompt (always available) -->
@@ -886,8 +892,8 @@
       }
 
       async function doSkillAction(id, action, paramsJson) {
-        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-        showActionStatus("⏳ Running...", "var(--hint)");
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        clearProgress();
         try {
           const params = paramsJson ? JSON.parse(paramsJson) : {};
           const r = await api("/api/inbox/" + id + "/action", {
@@ -920,7 +926,7 @@
         const item = allItems.find((i) => i.id === itemId);
         if (!item) return;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
-        showActionStatus("⏳ Posting comment...", "var(--hint)");
+        clearProgress();
 
         const params = { body: text };
         if (item.source === "github") {
@@ -955,7 +961,7 @@
         const item = allItems.find((i) => i.id === itemId);
         if (!item) return;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
-        showActionStatus("⏳ Sending reply...", "var(--hint)");
+        clearProgress();
 
         try {
           const r = await api("/api/inbox/" + itemId + "/action", {
@@ -1003,7 +1009,7 @@
         const item = allItems.find((i) => i.id === itemId);
         if (!item) return;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
-        showActionStatus("⏳ Transitioning to " + name + "...", "var(--hint)");
+        clearProgress();
         try {
           const r = await api("/api/inbox/" + itemId + "/action", {
             method: "POST",
@@ -1033,8 +1039,9 @@
         if (!text) return;
 
         input.disabled = true;
+        clearProgress();
         status.style.display = "block";
-        status.textContent = "⏳ Sending to Telegram...";
+        status.textContent = "⏳ Sending...";
         status.style.color = "var(--hint)";
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
 
@@ -1354,8 +1361,46 @@
         ws.onmessage = (e) => {
           const d = JSON.parse(e.data);
           if (d.type === "sync_complete") loadInbox();
+          if (d.type === "progress") handleProgress(d);
         };
       } catch (e) {}
+
+      function handleProgress(evt) {
+        // Only show progress for the currently viewed item
+        if (currentDetailId && evt.itemId === currentDetailId) {
+          const feed = document.getElementById("progress-feed");
+          const items = document.getElementById("progress-items");
+          if (!feed || !items) return;
+          feed.style.display = "block";
+
+          const statusIcon = evt.status === "done" ? "✅" : evt.status === "error" ? "❌" : "⏳";
+          const color =
+            evt.status === "done" ? "#4caf50" : evt.status === "error" ? "#f44" : "var(--hint)";
+          const time = new Date(evt.ts).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          });
+
+          const div = document.createElement("div");
+          div.style.cssText = `font-size:12px;padding:3px 0;color:${color};display:flex;gap:6px`;
+          div.innerHTML = `<span style="opacity:0.6;min-width:60px">${time}</span><span>${statusIcon} ${esc(evt.step)}</span>`;
+          items.appendChild(div);
+          feed.scrollTop = feed.scrollHeight;
+
+          if (tg?.HapticFeedback) {
+            if (evt.status === "done") tg.HapticFeedback.notificationOccurred("success");
+            if (evt.status === "error") tg.HapticFeedback.notificationOccurred("error");
+          }
+        }
+      }
+
+      function clearProgress() {
+        const feed = document.getElementById("progress-feed");
+        const items = document.getElementById("progress-items");
+        if (feed) feed.style.display = "none";
+        if (items) items.innerHTML = "";
+      }
 
       // Init
       loadInbox();

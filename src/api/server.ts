@@ -170,6 +170,11 @@ export function createServer() {
     }
   });
 
+  /** Broadcast a progress event to all connected WebSocket clients. */
+  function progress(itemId: string, step: string, status: "running" | "done" | "error") {
+    broadcast(wss, { type: "progress", itemId, step, status, ts: Date.now() });
+  }
+
   app.post("/api/inbox/:id/action", async (req, res) => {
     try {
       const { action, params } = req.body ?? {};
@@ -178,10 +183,14 @@ export function createServer() {
         return;
       }
 
+      const itemId = req.params.id;
+      progress(itemId, `Starting ${action}...`, "running");
+
       // Find the item to determine its source channel
       const all = getAll();
-      const item = all.find((i) => i.id === req.params.id);
+      const item = all.find((i) => i.id === itemId);
       if (!item) {
+        progress(itemId, `Item not found`, "error");
         res.status(404).json({ ok: false, error: "Not found" });
         return;
       }
@@ -189,6 +198,7 @@ export function createServer() {
       // Simple built-in actions
       if (["seen", "in_progress", "done", "dismissed"].includes(action)) {
         updateStatus(item.id, action as WorkItem["status"]);
+        progress(itemId, `Marked as ${action}`, "done");
         res.json({ ok: true, data: { id: item.id, status: action } });
         return;
       }
@@ -197,13 +207,16 @@ export function createServer() {
       const channels = getCachedChannels();
       const channel = channels.find((c) => c.name === item.source);
       if (!channel) {
+        progress(itemId, `No channel for ${item.source}`, "error");
         res.status(400).json({ ok: false, error: `No channel for source: ${item.source}` });
         return;
       }
 
       if (!channel.isConnected()) {
+        progress(itemId, `Connecting to ${item.source}...`, "running");
         await channel.connect();
       }
+      progress(itemId, `Executing ${action} on ${item.source}...`, "running");
       await channel.performAction(item.id, action, params);
       // Don't disconnect cached channels — they're reused across syncs
 
@@ -220,9 +233,11 @@ export function createServer() {
         updateStatus(item.id, newStatus);
       }
 
+      progress(itemId, `✅ ${action} completed`, "done");
       res.json({ ok: true, data: { id: item.id, action, status: newStatus || item.status } });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
+      progress(req.params.id, `❌ ${msg}`, "error");
       res.status(500).json({ ok: false, error: msg });
     }
   });
@@ -231,14 +246,18 @@ export function createServer() {
   app.post("/api/inbox/:id/prompt", async (req, res) => {
     try {
       const { text } = req.body ?? {};
+      const itemId = req.params.id;
       if (!text?.trim()) {
         res.status(400).json({ ok: false, error: "text required" });
         return;
       }
 
+      progress(itemId, "Preparing prompt...", "running");
+
       const all = getAll();
-      const item = all.find((i) => i.id === req.params.id);
+      const item = all.find((i) => i.id === itemId);
       if (!item) {
+        progress(itemId, "Item not found", "error");
         res.status(404).json({ ok: false, error: "Not found" });
         return;
       }
@@ -282,16 +301,20 @@ export function createServer() {
           disable_web_page_preview: true,
         }),
       });
+      progress(itemId, "Sending to Telegram...", "running");
       const tgData = (await tgRes.json()) as { ok: boolean; description?: string };
 
       if (!tgData.ok) {
+        progress(itemId, `Telegram error: ${tgData.description}`, "error");
         res.status(500).json({ ok: false, error: `Telegram API: ${tgData.description}` });
         return;
       }
 
+      progress(itemId, "✅ Sent to Telegram — check chat for response", "done");
       res.json({ ok: true, data: { sent: true } });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
+      progress(req.params.id, `❌ ${msg}`, "error");
       res.status(500).json({ ok: false, error: msg });
     }
   });
