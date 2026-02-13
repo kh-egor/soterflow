@@ -180,11 +180,6 @@
         font-weight: 700;
         margin-bottom: 8px;
       }
-      .detail-meta {
-        font-size: 13px;
-        color: var(--hint);
-        margin-bottom: 12px;
-      }
       .detail-body {
         font-size: 14px;
         line-height: 1.5;
@@ -246,6 +241,9 @@
       .dot-red {
         background: #f44336;
       }
+      .dot-yellow {
+        background: #ff8c00;
+      }
       .nav {
         position: fixed;
         bottom: 0;
@@ -289,30 +287,6 @@
         border-radius: 8px;
         font-size: 13px;
       }
-      .tool-card {
-        background: var(--section-bg);
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 10px;
-      }
-      .tool-name {
-        font-size: 14px;
-        font-weight: 600;
-        margin-bottom: 4px;
-      }
-      .tool-desc {
-        font-size: 13px;
-        color: var(--hint);
-      }
-      .tool-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 11px;
-        background: var(--btn);
-        color: var(--btn-text);
-        margin-left: 8px;
-      }
       .settings-select {
         background: var(--secondary-bg);
         color: var(--text);
@@ -321,6 +295,95 @@
         border-radius: 8px;
         font-size: 13px;
         margin-top: 4px;
+      }
+
+      /* Dashboard styles */
+      .stat-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      .stat-card {
+        background: var(--section-bg);
+        border-radius: 12px;
+        padding: 14px;
+        text-align: center;
+      }
+      .stat-number {
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .stat-label {
+        font-size: 12px;
+        color: var(--hint);
+        margin-top: 2px;
+      }
+      .stat-urgent .stat-number {
+        color: #ff4444;
+      }
+      .stat-high .stat-number {
+        color: #ff8c00;
+      }
+      .stat-new .stat-number {
+        color: var(--btn);
+      }
+      .stat-total .stat-number {
+        color: var(--text);
+      }
+      .channel-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .channel-row:last-child {
+        border-bottom: none;
+      }
+      .channel-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .channel-name {
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .channel-detail {
+        font-size: 12px;
+        color: var(--hint);
+      }
+      .channel-count {
+        font-size: 16px;
+        font-weight: 600;
+        min-width: 30px;
+        text-align: right;
+      }
+      .section-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .activity-item {
+        font-size: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        color: var(--hint);
+        display: flex;
+        gap: 8px;
+      }
+      .activity-item:last-child {
+        border-bottom: none;
+      }
+      .activity-time {
+        opacity: 0.6;
+        white-space: nowrap;
+        min-width: 55px;
       }
     </style>
   </head>
@@ -368,96 +431,18 @@
         <div id="detail-content"></div>
       </div>
 
+      <!-- DASHBOARD PAGE -->
+      <div id="page-dashboard" class="page">
+        <h1>📊 Dashboard</h1>
+        <p class="subtitle">System overview & health</p>
+        <div id="dashboard-content"><div class="loading">Loading...</div></div>
+      </div>
+
       <!-- SETTINGS PAGE -->
       <div id="page-settings" class="page">
         <h1>⚙️ Settings</h1>
-        <p class="subtitle">Configuration & status</p>
+        <p class="subtitle">Filters & configuration</p>
         <div id="settings-list"><div class="loading">Loading...</div></div>
-      </div>
-
-      <!-- DIRECTOR PAGE -->
-      <div id="page-director" class="page">
-        <h1>🎯 Director</h1>
-        <p class="subtitle">Sub-agent orchestration</p>
-
-        <!-- Dispatch -->
-        <div id="dispatch-section" style="margin-bottom: 16px">
-          <button class="sync-btn" onclick="showDispatchForm()">➕ New Task</button>
-          <div id="dispatch-form" style="display: none; margin-top: 10px">
-            <div class="settings-group">
-              <div class="settings-label">Work Item</div>
-              <select id="dispatch-item" class="settings-select" style="width: 100%"></select>
-              <div class="settings-label" style="margin-top: 8px">Skill</div>
-              <select id="dispatch-skill" class="settings-select" style="width: 100%"></select>
-              <div style="margin-top: 10px; display: flex; gap: 8px">
-                <button class="action-btn primary" onclick="doDispatch()">🚀 Dispatch</button>
-                <button
-                  class="action-btn"
-                  onclick="document.getElementById('dispatch-form').style.display = 'none'"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Sub-Agents -->
-        <h2 style="font-size: 15px; margin-bottom: 8px">🤖 Sub-Agents</h2>
-        <div id="agents-list"><div class="loading">Loading...</div></div>
-
-        <!-- Logs -->
-        <h2 style="font-size: 15px; margin: 16px 0 8px">📋 Logs</h2>
-        <div id="director-logs" style="max-height: 300px; overflow-y: auto"></div>
-
-        <!-- Memory -->
-        <h2 style="font-size: 15px; margin: 16px 0 8px">🧠 Memory</h2>
-        <button
-          class="sync-btn"
-          onclick="showMemoryAdd()"
-          style="margin-bottom: 8px; font-size: 12px; padding: 4px 10px"
-        >
-          + Add
-        </button>
-        <div id="memory-add-form" style="display: none; margin-bottom: 10px">
-          <div class="settings-group">
-            <input
-              id="mem-key"
-              placeholder="Key"
-              style="
-                width: 100%;
-                padding: 6px;
-                border-radius: 6px;
-                border: 1px solid var(--hint);
-                background: var(--secondary-bg);
-                color: var(--text);
-                margin-bottom: 6px;
-              "
-            />
-            <input
-              id="mem-val"
-              placeholder="Value"
-              style="
-                width: 100%;
-                padding: 6px;
-                border-radius: 6px;
-                border: 1px solid var(--hint);
-                background: var(--secondary-bg);
-                color: var(--text);
-                margin-bottom: 6px;
-              "
-            />
-            <button class="action-btn primary" onclick="doAddMemory()">Save</button>
-          </div>
-        </div>
-        <div id="memory-list"></div>
-      </div>
-
-      <!-- TOOLS PAGE -->
-      <div id="page-tools" class="page">
-        <h1>🔧 Tools</h1>
-        <p class="subtitle">Available skills & integrations</p>
-        <div id="tools-list"></div>
       </div>
     </div>
 
@@ -466,13 +451,12 @@
       <div class="nav-item active" onclick="showPage('inbox')">
         <span class="nav-icon">📥</span>Inbox
       </div>
+      <div class="nav-item" onclick="showPage('dashboard')">
+        <span class="nav-icon">📊</span>Dashboard
+      </div>
       <div class="nav-item" onclick="showPage('settings')">
         <span class="nav-icon">⚙️</span>Settings
       </div>
-      <div class="nav-item" onclick="showPage('director')">
-        <span class="nav-icon">🎯</span>Director
-      </div>
-      <div class="nav-item" onclick="showPage('tools')"><span class="nav-icon">🔧</span>Tools</div>
     </div>
 
     <script>
@@ -516,6 +500,8 @@
         d.textContent = s;
         return d.innerHTML;
       }
+
+      // --- Inbox ---
 
       function updateCounts() {
         const hideStatuses = ["seen", "done", "dismissed"];
@@ -561,12 +547,9 @@
       }
 
       function filterItems() {
-        // Hide seen/done/dismissed items unless showAll is toggled
         const hideStatuses = ["seen", "done", "dismissed"];
         let items = allItems.filter((i) => !hideStatuses.includes(i.status));
-        if (currentSource) {
-          items = items.filter((i) => i.source === currentSource);
-        }
+        if (currentSource) items = items.filter((i) => i.source === currentSource);
         renderItems(items);
         updateCounts();
       }
@@ -584,23 +567,14 @@
         } else {
           path += "?since=" + encodeURIComponent(new Date("2000-01-01").toISOString());
         }
-        // Apply Jira status filter
-        // Default: exclude Closed and Resolved on first use
-        if (localStorage.getItem("sf_jira_excluded") === null) {
+        if (localStorage.getItem("sf_jira_excluded") === null)
           localStorage.setItem("sf_jira_excluded", "Closed,Resolved");
-        }
         const excluded = localStorage.getItem("sf_jira_excluded") || "";
-        if (excluded) {
-          path += "&excludeStatuses=" + encodeURIComponent(excluded);
-        }
-        // Default: exclude ci_activity GitHub notifications
-        if (localStorage.getItem("sf_gh_excluded_reasons") === null) {
+        if (excluded) path += "&excludeStatuses=" + encodeURIComponent(excluded);
+        if (localStorage.getItem("sf_gh_excluded_reasons") === null)
           localStorage.setItem("sf_gh_excluded_reasons", "ci_activity");
-        }
         const ghExcluded = localStorage.getItem("sf_gh_excluded_reasons") || "";
-        if (ghExcluded) {
-          path += "&excludeReasons=" + encodeURIComponent(ghExcluded);
-        }
+        if (ghExcluded) path += "&excludeReasons=" + encodeURIComponent(ghExcluded);
         const r = await api(path);
         if (r.ok) {
           allItems = r.data || [];
@@ -629,6 +603,8 @@
         btn.textContent = "🔄 Sync";
       }
 
+      // --- Detail ---
+
       function getStatusInfo(item) {
         const m = item.metadata || {};
         const parts = [];
@@ -637,8 +613,9 @@
         if (m.repo) parts.push("📂 " + esc(m.repo));
         if (m.assignee) parts.push("👤 Assigned: " + esc(m.assignee));
         if (m.issueType) parts.push("🏷 Type: " + esc(m.issueType));
-        if (m.channelName) parts.push("💬 #" + esc(m.channelName));
+        if (m.from) parts.push("✉️ From: " + esc(m.from));
         if (m.isDM) parts.push("💬 Direct message");
+        if (m.unread) parts.push("🔵 Unread");
         if (item.status && item.status !== "new") parts.push("📌 " + item.status.replace("_", " "));
         return parts.join("<br>");
       }
@@ -697,6 +674,10 @@
           a.unshift({ label: "✅ Approve", action: "approve", primary: true });
           a.unshift({ label: "🔀 Merge", action: "merge" });
         }
+        if (item.source === "gmail") {
+          a.splice(1, 0, { label: "📂 Archive", action: "archive" });
+          a.splice(2, 0, { label: "⭐ Star", action: "star" });
+        }
         return a;
       }
 
@@ -710,6 +691,152 @@
         showPage("inbox");
       }
 
+      // --- Dashboard ---
+
+      async function loadDashboard() {
+        const el = document.getElementById("dashboard-content");
+        try {
+          const [statusRes, syncRes, logsRes] = await Promise.all([
+            api("/api/orchestrator/status"),
+            api("/api/sync/status"),
+            api("/api/director/logs?limit=15"),
+          ]);
+
+          let html = "";
+
+          // Priority stats from current items
+          const hideStatuses = ["seen", "done", "dismissed"];
+          const active = allItems.filter((i) => !hideStatuses.includes(i.status));
+          const urgent = active.filter((i) => i.priority === "urgent").length;
+          const high = active.filter((i) => i.priority === "high").length;
+          const newCount = active.filter((i) => i.status === "new").length;
+
+          html += `
+            <div class="stat-grid">
+              <div class="stat-card stat-urgent">
+                <div class="stat-number">${urgent}</div>
+                <div class="stat-label">🔴 Urgent</div>
+              </div>
+              <div class="stat-card stat-high">
+                <div class="stat-number">${high}</div>
+                <div class="stat-label">🟠 High Priority</div>
+              </div>
+              <div class="stat-card stat-new">
+                <div class="stat-number">${newCount}</div>
+                <div class="stat-label">🔵 New Items</div>
+              </div>
+              <div class="stat-card stat-total">
+                <div class="stat-number">${active.length}</div>
+                <div class="stat-label">📋 Total Active</div>
+              </div>
+            </div>
+          `;
+
+          // Channel health
+          if (statusRes.ok && syncRes.ok) {
+            const st = statusRes.data;
+            const channels = syncRes.data?.channels || [];
+            const states = syncRes.data?.syncStates || [];
+
+            html += '<div class="section-title">📡 Channels</div>';
+            html += '<div class="settings-group" style="padding:6px 14px">';
+
+            for (const ch of channels) {
+              const state = states.find((s) => s.channelName === ch.name);
+              const count = st.itemCounts?.[ch.name] || 0;
+              const lastSync = state ? timeAgo(state.lastSync) : "—";
+              const dotClass = ch.configured ? (state ? "dot-green" : "dot-yellow") : "dot-red";
+
+              html += `
+                <div class="channel-row">
+                  <div class="channel-info">
+                    <span class="dot ${dotClass}"></span>
+                    <div>
+                      <div class="channel-name">${sourceIcon(ch.name)} ${ch.name}</div>
+                      <div class="channel-detail">${ch.configured ? "Synced " + lastSync + " ago" : "Not configured"}</div>
+                    </div>
+                  </div>
+                  <div class="channel-count">${count}</div>
+                </div>
+              `;
+            }
+            html += "</div>";
+
+            // Sync button + last sync
+            const lastSync = st.lastSync ? new Date(st.lastSync).toLocaleTimeString() : "Never";
+            html += `
+              <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0">
+                <span style="font-size:12px;color:var(--hint)">Last sync: ${lastSync}</span>
+                <button class="sync-btn" onclick="doDashboardSync(this)">🔄 Sync Now</button>
+              </div>
+            `;
+          }
+
+          // Recent activity
+          if (logsRes.ok && logsRes.data?.length) {
+            html += '<div class="section-title" style="margin-top:16px">📋 Recent Activity</div>';
+            html += '<div class="settings-group" style="padding:8px 14px">';
+            const colors = { info: "var(--hint)", warn: "#ff8c00", error: "#f44" };
+            for (const l of logsRes.data) {
+              const time = new Date(l.timestamp).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              });
+              html += `<div class="activity-item" style="color:${colors[l.level] || "var(--hint)"}">
+                <span class="activity-time">${time}</span>
+                <span>${esc(l.message)}</span>
+              </div>`;
+            }
+            html += "</div>";
+          }
+
+          // Quick actions
+          html += `
+            <div class="section-title" style="margin-top:16px">⚡ Quick Actions</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <button class="action-btn" onclick="markAllSeen()">👁 Mark All Seen</button>
+              <button class="action-btn" onclick="window.open(API + '/api/inbox?since=2000-01-01T00:00:00.000Z','_blank')">📄 Export JSON</button>
+            </div>
+          `;
+
+          el.innerHTML = html;
+        } catch (e) {
+          el.innerHTML = '<div class="empty">⚠️ Failed to load dashboard</div>';
+        }
+      }
+
+      async function doDashboardSync(btn) {
+        btn.disabled = true;
+        btn.textContent = "⏳ Syncing...";
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        try {
+          await api("/api/sync", { method: "POST" });
+          await loadInbox();
+          await loadDashboard();
+        } catch (e) {
+          console.error(e);
+        }
+        btn.disabled = false;
+        btn.textContent = "🔄 Sync Now";
+      }
+
+      async function markAllSeen() {
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        const hideStatuses = ["seen", "done", "dismissed"];
+        const newItems = allItems.filter((i) => !hideStatuses.includes(i.status));
+        for (const item of newItems) {
+          await api("/api/inbox/" + item.id + "/action", {
+            method: "POST",
+            body: JSON.stringify({ action: "seen" }),
+          });
+        }
+        await loadInbox();
+        loadDashboard();
+      }
+
+      // --- Settings ---
+
       async function loadSettings() {
         const el = document.getElementById("settings-list");
         try {
@@ -720,60 +847,21 @@
 
           let html = "";
 
-          // Orchestrator status section
+          // Sync window
           if (statusRes.ok) {
             const st = statusRes.data;
-            const lastSync = st.lastSync ? new Date(st.lastSync).toLocaleString() : "Never";
-            const totalItems = Object.values(st.itemCounts || {}).reduce((a, b) => a + b, 0);
             html += `
               <div class="settings-group">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                  <span>🤖 <strong>Orchestrator</strong></span>
-                  <span class="dot ${st.running ? "dot-green" : "dot-red"}"></span>
-                </div>
-                <div class="settings-label" style="margin-top:6px">Status: ${st.running ? "Running" : "Stopped"}</div>
-                <div class="settings-label">Last sync: ${lastSync}</div>
-                <div class="settings-label">Total items: ${totalItems}</div>
-                <div class="settings-label" style="margin-top:8px">Sync window:
-                  <select class="settings-select" id="sync-window-select" onchange="onSyncWindowChange()">
-                    ${[1, 3, 7, 14, 30].map((d) => `<option value="${d}" ${d === st.syncWindowDays ? "selected" : ""}>${d} days</option>`).join("")}
-                  </select>
-                </div>
+                <div class="settings-label">Sync Window</div>
+                <select class="settings-select" id="sync-window-select" onchange="onSyncWindowChange()" style="width:100%">
+                  ${[1, 3, 7, 14, 30].map((d) => `<option value="${d}" ${d === st.syncWindowDays ? "selected" : ""}>${d} days</option>`).join("")}
+                </select>
+                <div class="settings-label" style="margin-top:8px;font-size:11px">Set via SOTERFLOW_SYNC_WINDOW_DAYS env var</div>
               </div>
             `;
-
-            // Per-source counts
-            if (st.itemCounts && Object.keys(st.itemCounts).length) {
-              html +=
-                '<div class="settings-group"><div style="margin-bottom:6px"><strong>📊 Items per channel</strong></div>';
-              for (const [source, count] of Object.entries(st.itemCounts)) {
-                html += `<div class="settings-label">${sourceIcon(source)} ${source}: <strong style="color:var(--text)">${count}</strong></div>`;
-              }
-              html += "</div>";
-            }
           }
 
-          // Channel configs
-          if (syncRes.ok) {
-            const channels = syncRes.data?.channels || [];
-            const states = syncRes.data?.syncStates || [];
-            for (const ch of channels) {
-              const state = states.find((s) => s.channelName === ch.name);
-              const lastSync = state ? new Date(state.lastSync).toLocaleString() : "Never";
-              html += `
-                <div class="settings-group">
-                  <div style="display:flex;justify-content:space-between;align-items:center">
-                    <span>${sourceIcon(ch.name)} <strong>${ch.name}</strong></span>
-                    <span class="dot ${ch.configured ? "dot-green" : "dot-red"}"></span>
-                  </div>
-                  <div class="settings-label" style="margin-top:6px">Status: ${ch.configured ? "Connected" : "Not configured"}</div>
-                  <div class="settings-label">Last sync: ${lastSync}</div>
-                </div>
-              `;
-            }
-          }
-
-          // Jira status filter section
+          // Jira status filter
           try {
             const statusRes2 = await api("/api/jira/statuses");
             if (statusRes2.ok && statusRes2.data?.length) {
@@ -781,13 +869,12 @@
               const excluded = saved ? saved.split(",") : [];
               html +=
                 '<div class="settings-group"><div style="margin-bottom:8px"><strong>🔷 Jira Status Filter</strong></div>';
-              html +=
-                '<div class="settings-label" style="margin-bottom:6px">Toggle which statuses to show in inbox:</div>';
+              html += '<div class="settings-label" style="margin-bottom:6px">Show in inbox:</div>';
               for (const st of statusRes2.data) {
                 const isExcluded = excluded.includes(st);
                 const checked = isExcluded ? "" : "checked";
-                html += `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px;color:var(--text)">
-                  <input type="checkbox" ${checked} onchange="toggleJiraStatus('${st.replace(/'/g, "\\'")}', this.checked)" style="width:18px;height:18px;accent-color:var(--accent)">
+                html += `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px">
+                  <input type="checkbox" ${checked} onchange="toggleJiraStatus('${st.replace(/'/g, "\\'")}', this.checked)" style="width:18px;height:18px;accent-color:var(--btn)">
                   <span>${esc(st)}</span>
                 </label>`;
               }
@@ -795,7 +882,35 @@
             }
           } catch {}
 
-          el.innerHTML = html || '<div class="empty">No data available</div>';
+          // GitHub reason filter
+          const ghReasons = [
+            "author",
+            "assign",
+            "review_requested",
+            "mention",
+            "comment",
+            "ci_activity",
+            "security_alert",
+            "state_change",
+            "subscribed",
+            "team_mention",
+          ];
+          const ghSaved = localStorage.getItem("sf_gh_excluded_reasons") || "";
+          const ghExcluded = ghSaved ? ghSaved.split(",") : [];
+          html +=
+            '<div class="settings-group"><div style="margin-bottom:8px"><strong>🐙 GitHub Reason Filter</strong></div>';
+          html += '<div class="settings-label" style="margin-bottom:6px">Show in inbox:</div>';
+          for (const reason of ghReasons) {
+            const isExcluded = ghExcluded.includes(reason);
+            const checked = isExcluded ? "" : "checked";
+            html += `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px">
+              <input type="checkbox" ${checked} onchange="toggleGhReason('${reason}', this.checked)" style="width:18px;height:18px;accent-color:var(--btn)">
+              <span>${esc(reason.replace(/_/g, " "))}</span>
+            </label>`;
+          }
+          html += "</div>";
+
+          el.innerHTML = html || '<div class="empty">No settings available</div>';
         } catch (e) {
           el.innerHTML = '<div class="empty">⚠️ Failed to load settings</div>';
         }
@@ -813,49 +928,27 @@
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
       }
 
+      function toggleGhReason(reason, enabled) {
+        const saved = localStorage.getItem("sf_gh_excluded_reasons") || "";
+        let excluded = saved ? saved.split(",") : [];
+        if (enabled) {
+          excluded = excluded.filter((s) => s !== reason);
+        } else {
+          if (!excluded.includes(reason)) excluded.push(reason);
+        }
+        localStorage.setItem("sf_gh_excluded_reasons", excluded.join(","));
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+      }
+
       function onSyncWindowChange() {
         const days = document.getElementById("sync-window-select").value;
-        // This would need a config API endpoint to persist — show info for now
         if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning");
         alert(
           "Set SOTERFLOW_SYNC_WINDOW_DAYS=" + days + " in your environment and restart the API.",
         );
       }
 
-      function loadTools() {
-        const tools = [
-          {
-            name: "github-pr",
-            desc: "Review, approve, and merge GitHub pull requests",
-            status: "active",
-          },
-          {
-            name: "jira-update",
-            desc: "Transition, comment, and assign Jira issues",
-            status: "active",
-          },
-          {
-            name: "slack-reply",
-            desc: "Reply to Slack messages and threads",
-            status: "coming soon",
-          },
-          {
-            name: "deploy",
-            desc: "Trigger deployments via GitHub Actions or Vercel",
-            status: "coming soon",
-          },
-        ];
-        document.getElementById("tools-list").innerHTML = tools
-          .map(
-            (t) => `
-          <div class="tool-card">
-            <div class="tool-name">${t.name} <span class="tool-badge">${t.status}</span></div>
-            <div class="tool-desc">${t.desc}</div>
-          </div>
-        `,
-          )
-          .join("");
-      }
+      // --- Navigation ---
 
       function showPage(name) {
         document.querySelectorAll(".page").forEach((p) => p.classList.remove("visible"));
@@ -864,14 +957,12 @@
           n.classList.toggle(
             "active",
             (name === "inbox" && i === 0) ||
-              (name === "settings" && i === 1) ||
-              (name === "director" && i === 2) ||
-              (name === "tools" && i === 3),
+              (name === "dashboard" && i === 1) ||
+              (name === "settings" && i === 2),
           );
         });
+        if (name === "dashboard") loadDashboard();
         if (name === "settings") loadSettings();
-        if (name === "tools") loadTools();
-        if (name === "director") loadDirector();
         if (name === "inbox" && tg?.BackButton) tg.BackButton.hide();
       }
 
@@ -893,141 +984,6 @@
           if (d.type === "sync_complete") loadInbox();
         };
       } catch (e) {}
-
-      // --- Director ---
-      let directorSkills = [];
-
-      async function loadDirector() {
-        await Promise.all([
-          loadAgents(),
-          loadDirectorLogs(),
-          loadMemory(),
-          loadSkillsForDispatch(),
-        ]);
-      }
-
-      async function loadSkillsForDispatch() {
-        const r = await api("/api/director/skills");
-        if (r.ok) directorSkills = r.data;
-      }
-
-      async function loadAgents() {
-        const r = await api("/api/director/agents");
-        const el = document.getElementById("agents-list");
-        if (!r.ok || !r.data.length) {
-          el.innerHTML = '<div class="empty" style="padding:20px">No sub-agents yet</div>';
-          return;
-        }
-        el.innerHTML = r.data
-          .map((a) => {
-            const badge =
-              { idle: "🟢", running: "🔵", completed: "✅", failed: "❌" }[a.status] || "⚪";
-            const time = a.startedAt ? timeAgo(a.startedAt) : "";
-            return `<div class="card" onclick="this.querySelector('.agent-detail').classList.toggle('visible')">
-            <div class="card-header"><span>${badge}</span><span class="card-title">${esc(a.name)}</span><span class="badge badge-normal">${a.skill}</span></div>
-            <div class="card-meta"><span>${a.status}</span><span>${time}</span></div>
-            ${a.task ? `<div class="card-body">Task: ${esc(a.task)}</div>` : ""}
-            <div class="agent-detail" style="display:none;margin-top:8px;font-size:12px;color:var(--hint)">
-              ${a.result ? `<div>Result: ${esc(a.result)}</div>` : ""}
-              ${a.error ? `<div style="color:#f44">Error: ${esc(a.error)}</div>` : ""}
-            </div>
-          </div>`;
-          })
-          .join("");
-        // make detail toggle work
-        el.querySelectorAll(".agent-detail").forEach((d) => (d.style.display = ""));
-        el.querySelectorAll(".agent-detail").forEach((d) => d.classList.remove("visible"));
-      }
-
-      async function loadDirectorLogs() {
-        const r = await api("/api/director/logs?limit=30");
-        const el = document.getElementById("director-logs");
-        if (!r.ok || !r.data.length) {
-          el.innerHTML =
-            '<div style="color:var(--hint);font-size:13px;padding:8px">No logs yet</div>';
-          return;
-        }
-        const colors = { info: "var(--hint)", warn: "#ff8c00", error: "#f44" };
-        el.innerHTML = r.data
-          .map(
-            (
-              l,
-            ) => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #222;color:${colors[l.level] || "var(--hint)"}">
-          <span style="opacity:0.6">${new Date(l.timestamp).toLocaleTimeString()}</span> ${esc(l.message)}${l.agentId ? ` <span style="opacity:0.5">[${l.agentId.slice(0, 8)}]</span>` : ""}
-        </div>`,
-          )
-          .join("");
-      }
-
-      async function loadMemory() {
-        const r = await api("/api/director/memory");
-        const el = document.getElementById("memory-list");
-        if (!r.ok || !Object.keys(r.data).length) {
-          el.innerHTML =
-            '<div style="color:var(--hint);font-size:13px;padding:8px">No memory entries</div>';
-          return;
-        }
-        el.innerHTML = Object.entries(r.data)
-          .map(
-            ([
-              k,
-              v,
-            ]) => `<div class="settings-group" style="display:flex;justify-content:space-between;align-items:center">
-          <div><div class="settings-label">${esc(k)}</div><div class="settings-value">${esc(v)}</div></div>
-          <button class="action-btn" onclick="deleteMemory('${esc(k)}')" style="font-size:11px;padding:4px 8px">🗑</button>
-        </div>`,
-          )
-          .join("");
-      }
-
-      function showDispatchForm() {
-        const form = document.getElementById("dispatch-form");
-        form.style.display = form.style.display === "none" ? "block" : "none";
-        // Populate items
-        const itemSel = document.getElementById("dispatch-item");
-        itemSel.innerHTML = allItems
-          .map((i) => `<option value="${i.id}">${esc(i.title.slice(0, 60))}</option>`)
-          .join("");
-        // Populate skills
-        const skillSel = document.getElementById("dispatch-skill");
-        skillSel.innerHTML = directorSkills
-          .map((s) => `<option value="${s.id}">${s.name} — ${s.description}</option>`)
-          .join("");
-      }
-
-      async function doDispatch() {
-        const workItemId = document.getElementById("dispatch-item").value;
-        const skill = document.getElementById("dispatch-skill").value;
-        if (!workItemId || !skill) return;
-        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
-        await api("/api/director/dispatch", {
-          method: "POST",
-          body: JSON.stringify({ workItemId, skill }),
-        });
-        document.getElementById("dispatch-form").style.display = "none";
-        loadDirector();
-      }
-
-      function showMemoryAdd() {
-        const f = document.getElementById("memory-add-form");
-        f.style.display = f.style.display === "none" ? "block" : "none";
-      }
-
-      async function doAddMemory() {
-        const key = document.getElementById("mem-key").value.trim();
-        const value = document.getElementById("mem-val").value.trim();
-        if (!key) return;
-        await api("/api/director/memory", { method: "POST", body: JSON.stringify({ key, value }) });
-        document.getElementById("mem-key").value = "";
-        document.getElementById("mem-val").value = "";
-        document.getElementById("memory-add-form").style.display = "none";
-        loadMemory();
-      }
-
-      async function deleteMemory(key) {
-        await api("/api/director/memory/" + encodeURIComponent(key), { method: "DELETE" });
-        loadMemory();
-      }
 
       // Init
       loadInbox();
