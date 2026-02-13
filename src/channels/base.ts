@@ -6,7 +6,7 @@
 /** Represents a single actionable item from any connected channel. */
 export interface WorkItem {
   id: string;
-  source: "jira" | "github" | "slack" | "telegram" | string;
+  source: string;
   type: "mention" | "task" | "message" | "pr" | "issue" | "notification";
   title: string;
   body: string;
@@ -14,7 +14,7 @@ export interface WorkItem {
   timestamp: Date;
   priority: "urgent" | "high" | "normal" | "low";
   url: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   status: "new" | "seen" | "in_progress" | "done" | "dismissed";
 }
 
@@ -52,6 +52,6 @@ export abstract class BaseChannel {
   abstract performAction(
     itemId: string,
     action: string,
-    params?: Record<string, any>,
+    params?: Record<string, unknown>,
   ): Promise<void>;
 }

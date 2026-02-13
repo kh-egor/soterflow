@@ -10,6 +10,12 @@ import { withRetry, sleep } from "./retry";
 
 const RATE_LIMIT_THRESHOLD = 10; // back off when remaining < this
 
+/** Minimal label shape from GitHub API */
+interface GhLabel {
+  name?: string;
+  [key: string]: unknown;
+}
+
 export class GitHubChannel extends BaseChannel {
   name = "github";
   private octokit: Octokit | null = null;
@@ -35,10 +41,14 @@ export class GitHubChannel extends BaseChannel {
   /** Retry wrapper with exponential backoff and rate-limit awareness. */
   private withRetry<T>(fn: () => Promise<T>): Promise<T> {
     return withRetry(fn, {
-      isRetryable: (err: any) => {
-        const status = err?.status ?? err?.response?.status;
-        const isRateLimit = status === 403 && /rate limit/i.test(err?.message ?? "");
-        return isRateLimit || status >= 500 || err?.code === "ECONNRESET";
+      isRetryable: (err: unknown) => {
+        const e = err as Record<string, unknown>;
+        const status = (e?.status ?? (e?.response as Record<string, unknown>)?.status) as
+          | number
+          | undefined;
+        const msg = typeof e?.message === "string" ? e.message : "";
+        const isRateLimit = status === 403 && /rate limit/i.test(msg);
+        return isRateLimit || (status !== undefined && status >= 500) || e?.code === "ECONNRESET";
       },
     });
   }
@@ -123,7 +133,7 @@ export class GitHubChannel extends BaseChannel {
     );
     for (const m of mentions) {
       // avoid duplicates
-      const id = m.pull_request ? `github-pr-${m.id}` : `github-issue-${m.id}`;
+      const id = m.pull_request ? `github-pr-${String(m.id)}` : `github-issue-${String(m.id)}`;
       if (!items.some((i) => i.id === id)) {
         items.push(mapMention(m));
       }
@@ -132,7 +142,11 @@ export class GitHubChannel extends BaseChannel {
     return items;
   }
 
-  async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
+  async performAction(
+    itemId: string,
+    action: string,
+    params?: Record<string, unknown>,
+  ): Promise<void> {
     if (!this.octokit) {
       throw new Error("Not connected");
     }
@@ -155,7 +169,7 @@ export class GitHubChannel extends BaseChannel {
             repo,
             pull_number: number,
             event: "APPROVE",
-            body: meta.body ?? "",
+            body: (meta.body as string) ?? "",
           });
           break;
         case "comment":
@@ -175,23 +189,29 @@ export class GitHubChannel extends BaseChannel {
 
 // --- Mapping helpers (exported for testing) ---
 
+function labelName(l: string | GhLabel): string {
+  return typeof l === "string" ? l.toLowerCase() : ((l.name as string) ?? "").toLowerCase();
+}
+
+function labelNames(labels: unknown): string[] {
+  if (!Array.isArray(labels)) {
+    return [];
+  }
+  return labels.map((l: string | GhLabel) => labelName(l));
+}
+
 export function assignPriority(item: {
-  labels?: any[];
+  labels?: unknown[];
   reason?: string;
   isPR?: boolean;
   isReviewRequest?: boolean;
 }): WorkItem["priority"] {
-  const labelNames: string[] = (item.labels ?? []).map((l: any) =>
-    typeof l === "string" ? l.toLowerCase() : (l.name ?? "").toLowerCase(),
-  );
+  const names = labelNames(item.labels);
 
-  if (labelNames.some((l) => l.includes("urgent") || l.includes("critical") || l === "p0")) {
+  if (names.some((l) => l.includes("urgent") || l.includes("critical") || l === "p0")) {
     return "urgent";
   }
-  if (
-    labelNames.some((l) => l.includes("high") || l === "p1") ||
-    item.reason === "security_alert"
-  ) {
+  if (names.some((l) => l.includes("high") || l === "p1") || item.reason === "security_alert") {
     return "urgent";
   }
   if (item.isReviewRequest || item.reason === "review_requested") {
@@ -200,15 +220,18 @@ export function assignPriority(item: {
   if (item.reason === "assign" || item.reason === "mention") {
     return "high";
   }
-  if (labelNames.some((l) => l.includes("low") || l === "p3")) {
+  if (names.some((l) => l.includes("low") || l === "p3")) {
     return "low";
   }
   return "normal";
 }
 
-export function mapNotification(n: any): WorkItem {
+export function mapNotification(n: Record<string, unknown>): WorkItem {
+  const subject = n.subject as Record<string, unknown>;
+  const repository = n.repository as Record<string, unknown>;
+
   // Convert API URL to web URL
-  const apiUrl: string = n.subject.url ?? "";
+  const apiUrl: string = (subject.url as string) ?? "";
   const webUrl = apiUrl
     .replace("https://api.github.com/repos/", "https://github.com/")
     .replace("/pulls/", "/pull/");
@@ -226,85 +249,87 @@ export function mapNotification(n: any): WorkItem {
     subscribed: "Subscribed",
     team_mention: "Team mentioned",
   };
-  const reasonText = reasonMap[n.reason] ?? n.reason;
+  const reason = n.reason as string;
+  const reasonText = reasonMap[reason] ?? reason;
+  const fullName = (repository.full_name as string) ?? "";
 
   return {
-    id: `github-notif-${n.id}`,
+    id: `github-notif-${String(n.id)}`,
     source: "github",
     type:
-      n.subject.type === "PullRequest"
-        ? "pr"
-        : n.subject.type === "Issue"
-          ? "issue"
-          : "notification",
-    title: n.subject.title,
-    body: `${reasonText} · ${n.repository.full_name} · ${n.subject.type}`,
-    author: n.repository.full_name.split("/")[1] ?? n.repository.full_name,
-    timestamp: new Date(n.updated_at),
-    priority: assignPriority({ reason: n.reason }),
-    url: webUrl || `https://github.com/${n.repository.full_name}`,
+      subject.type === "PullRequest" ? "pr" : subject.type === "Issue" ? "issue" : "notification",
+    title: subject.title as string,
+    body: `${reasonText} · ${fullName} · ${subject.type as string}`,
+    author: fullName.split("/")[1] ?? fullName,
+    timestamp: new Date(n.updated_at as string),
+    priority: assignPriority({ reason }),
+    url: webUrl || `https://github.com/${fullName}`,
     metadata: {
-      reason: n.reason,
+      reason,
       reasonText,
-      subjectType: n.subject.type,
+      subjectType: subject.type,
       threadId: n.id,
-      repo: n.repository.full_name,
+      repo: fullName,
     },
     status: "new",
   };
 }
 
-export function mapIssue(issue: any): WorkItem {
+export function mapIssue(issue: Record<string, unknown>): WorkItem {
+  const user = issue.user as Record<string, unknown> | undefined;
+  const repo = issue.repository as Record<string, unknown> | undefined;
   return {
-    id: `github-issue-${issue.id}`,
+    id: `github-issue-${String(issue.id)}`,
     source: "github",
     type: "issue",
-    title: issue.title,
-    body: issue.body ?? "",
-    author: issue.user?.login ?? "unknown",
-    timestamp: new Date(issue.updated_at),
-    priority: assignPriority({ labels: issue.labels, reason: "assign" }),
-    url: issue.html_url,
+    title: issue.title as string,
+    body: (issue.body as string) ?? "",
+    author: (user?.login as string) ?? "unknown",
+    timestamp: new Date(issue.updated_at as string),
+    priority: assignPriority({ labels: issue.labels as unknown[], reason: "assign" }),
+    url: issue.html_url as string,
     metadata: {
       number: issue.number,
-      labels: (issue.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
-      repo: issue.repository?.full_name,
+      labels: labelNames(issue.labels).map((l) => l),
+      repo: repo?.full_name,
     },
     status: "new",
   };
 }
 
-export function mapPR(pr: any): WorkItem {
+export function mapPR(pr: Record<string, unknown>): WorkItem {
+  const user = pr.user as Record<string, unknown> | undefined;
   return {
-    id: `github-pr-${pr.id}`,
+    id: `github-pr-${String(pr.id)}`,
     source: "github",
     type: "pr",
-    title: pr.title,
-    body: pr.body ?? "",
-    author: pr.user?.login ?? "unknown",
-    timestamp: new Date(pr.updated_at),
-    priority: assignPriority({ isReviewRequest: true, labels: pr.labels }),
-    url: pr.html_url,
+    title: pr.title as string,
+    body: (pr.body as string) ?? "",
+    author: (user?.login as string) ?? "unknown",
+    timestamp: new Date(pr.updated_at as string),
+    priority: assignPriority({ isReviewRequest: true, labels: pr.labels as unknown[] }),
+    url: pr.html_url as string,
     metadata: { number: pr.number },
     status: "new",
   };
 }
 
-export function mapMention(m: any): WorkItem {
+export function mapMention(m: Record<string, unknown>): WorkItem {
   const isPR = !!m.pull_request;
+  const user = m.user as Record<string, unknown> | undefined;
   return {
-    id: isPR ? `github-pr-${m.id}` : `github-issue-${m.id}`,
+    id: isPR ? `github-pr-${String(m.id)}` : `github-issue-${String(m.id)}`,
     source: "github",
     type: isPR ? "pr" : "issue",
-    title: m.title,
-    body: m.body ?? "",
-    author: m.user?.login ?? "unknown",
-    timestamp: new Date(m.updated_at),
-    priority: assignPriority({ labels: m.labels, reason: "mention" }),
-    url: m.html_url,
+    title: m.title as string,
+    body: (m.body as string) ?? "",
+    author: (user?.login as string) ?? "unknown",
+    timestamp: new Date(m.updated_at as string),
+    priority: assignPriority({ labels: m.labels as unknown[], reason: "mention" }),
+    url: m.html_url as string,
     metadata: {
       number: m.number,
-      labels: (m.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
+      labels: labelNames(m.labels),
     },
     status: "new",
   };

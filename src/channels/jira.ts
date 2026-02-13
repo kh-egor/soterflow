@@ -22,7 +22,7 @@ export interface JiraIssue {
     created: string;
     issuetype: { name: string };
     comment?: { comments: Array<{ author: { displayName: string }; body: string }> };
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -56,18 +56,26 @@ export class JiraChannel extends BaseChannel {
     this._connected = false;
   }
 
-  private async request(path: string, options?: RequestInit): Promise<any> {
+  private async request(path: string, options?: RequestInit): Promise<unknown> {
     return withRetry(async () => {
+      const headers: Record<string, string> = {
+        Authorization: `Basic ${this.auth}`,
+        "Content-Type": "application/json",
+      };
+      // Merge custom headers
+      if (options?.headers) {
+        const h = options.headers as Record<string, string>;
+        Object.assign(headers, h);
+      }
       const res = await fetch(`${this.baseUrl}${path}`, {
         ...options,
-        headers: {
-          Authorization: `Basic ${this.auth}`,
-          "Content-Type": "application/json",
-          ...options?.headers,
-        },
+        headers,
       });
       if (!res.ok) {
-        const err: any = new Error(`Jira API error: ${res.status} ${res.statusText}`);
+        const err = new Error(`Jira API error: ${res.status} ${res.statusText}`) as Error & {
+          status: number;
+          response: { headers: Headers };
+        };
         err.status = res.status;
         err.response = { headers: res.headers };
         throw err;
@@ -89,8 +97,12 @@ export class JiraChannel extends BaseChannel {
       if (nextPageToken) {
         params.set("nextPageToken", nextPageToken);
       }
-      const data = await this.request(`/rest/api/3/search/jql?${params.toString()}`);
-      issues.push(...(data.issues as JiraIssue[]));
+      const data = (await this.request(`/rest/api/3/search/jql?${params.toString()}`)) as {
+        issues: JiraIssue[];
+        isLast?: boolean;
+        nextPageToken?: string;
+      };
+      issues.push(...data.issues);
       if (data.isLast || !data.nextPageToken || data.issues.length === 0) {
         break;
       }
@@ -126,7 +138,11 @@ export class JiraChannel extends BaseChannel {
     return items;
   }
 
-  async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
+  async performAction(
+    itemId: string,
+    action: string,
+    params?: Record<string, unknown>,
+  ): Promise<void> {
     const key = (params?.key as string) ?? itemId.replace("jira-", "");
 
     switch (action) {
@@ -173,7 +189,7 @@ function extractAdfText(desc: unknown): string {
     return desc;
   }
   if (typeof desc !== "object") {
-    return String(desc);
+    return JSON.stringify(desc);
   }
 
   const extract = (node: unknown): string => {

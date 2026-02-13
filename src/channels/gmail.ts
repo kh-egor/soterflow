@@ -10,6 +10,26 @@ import { BaseChannel, WorkItem } from "./base.js";
 
 const MAX_EMAILS = 20;
 
+/** Typed subset of imapflow FetchMessageObject we actually use */
+interface ImapMessage {
+  uid: number;
+  source?: Buffer;
+  flags?: Set<string>;
+  labels?: Set<string>;
+  threadId?: string;
+}
+
+/** Helper to extract .text from parsed address fields */
+function addressText(field: ParsedMail["to"]): string {
+  if (!field) {
+    return "";
+  }
+  if (Array.isArray(field)) {
+    return field.map((a) => a.text).join(", ");
+  }
+  return field.text || "";
+}
+
 export class GmailChannel extends BaseChannel {
   name = "gmail";
   private client: ImapFlow | null = null;
@@ -30,7 +50,7 @@ export class GmailChannel extends BaseChannel {
       port: parseInt(process.env.GMAIL_IMAP_PORT || "993", 10),
       secure: true,
       auth: { user, pass },
-      logger: false as any,
+      logger: false as unknown as Record<string, never>,
     });
 
     await this.client.connect();
@@ -63,16 +83,16 @@ export class GmailChannel extends BaseChannel {
     const lock = await this.client.getMailboxLock("INBOX");
     try {
       // Fetch UNSEEN first, then recent — dedup by uid
-      for (const query of [{ seen: false, since }, { since }]) {
+      for (const query of [{ seen: false, since }, { since }] as const) {
         try {
-          for await (const msg of this.client.fetch(query as any, {
+          for await (const msg of this.client.fetch(query, {
             envelope: true,
             source: true,
             flags: true,
             uid: true,
             labels: true,
             threadId: true,
-          })) {
+          }) as AsyncIterable<ImapMessage>) {
             if (seenUids.has(msg.uid)) {
               continue;
             }
@@ -87,7 +107,7 @@ export class GmailChannel extends BaseChannel {
                 continue;
               }
               const parsed = await simpleParser(source);
-              items.push(this.mapEmail(msg, parsed as unknown as ParsedMail));
+              items.push(this.mapEmail(msg, parsed));
             } catch {
               // skip unparseable emails
             }
@@ -106,7 +126,7 @@ export class GmailChannel extends BaseChannel {
     return items;
   }
 
-  private mapEmail(msg: any, parsed: ParsedMail): WorkItem {
+  private mapEmail(msg: ImapMessage, parsed: ParsedMail): WorkItem {
     const subject = parsed.subject || "(no subject)";
     const fromAddr = parsed.from?.value?.[0];
     const author = fromAddr?.name || fromAddr?.address || "unknown";
@@ -132,7 +152,7 @@ export class GmailChannel extends BaseChannel {
     return {
       id: `gmail-${msg.uid}`,
       source: "gmail",
-      type: "email" as any,
+      type: "notification",
       title: subject,
       body: textBody,
       author,
@@ -141,8 +161,8 @@ export class GmailChannel extends BaseChannel {
       url: `https://mail.google.com/mail/u/0/#inbox/${hexId}`,
       metadata: {
         from: fromAddr?.address || "",
-        to: (parsed.to as any)?.text || "",
-        cc: (parsed.cc as any)?.text || "",
+        to: addressText(parsed.to),
+        cc: addressText(parsed.cc),
         unread: isUnread,
         labels: msg.labels ? [...msg.labels] : [],
         messageId,
@@ -152,7 +172,11 @@ export class GmailChannel extends BaseChannel {
     };
   }
 
-  async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
+  async performAction(
+    itemId: string,
+    action: string,
+    _params?: Record<string, unknown>,
+  ): Promise<void> {
     if (!this.client) {
       throw new Error("Not connected");
     }
@@ -167,17 +191,24 @@ export class GmailChannel extends BaseChannel {
     try {
       switch (action) {
         case "read":
-          await this.client.messageFlagsAdd({ uid }, ["\\Seen"], { uid: true } as any);
+          await this.client.messageFlagsAdd({ uid }, ["\\Seen"], { uid: true } as Record<
+            string,
+            unknown
+          >);
           break;
         case "archive":
-          // Gmail archive = remove from INBOX (move to All Mail)
-          await this.client.messageMove({ uid }, "[Gmail]/All Mail", { uid: true } as any);
+          await this.client.messageMove({ uid }, "[Gmail]/All Mail", { uid: true } as Record<
+            string,
+            unknown
+          >);
           break;
         case "star":
-          await this.client.messageFlagsAdd({ uid }, ["\\Flagged"], { uid: true } as any);
+          await this.client.messageFlagsAdd({ uid }, ["\\Flagged"], { uid: true } as Record<
+            string,
+            unknown
+          >);
           break;
         case "reply":
-          // IMAP can't send — just mark as seen for now
           console.warn("[gmail] Reply action not supported via IMAP; use SMTP instead");
           break;
         default:

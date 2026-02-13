@@ -88,9 +88,7 @@ export function createServer() {
           if (i.source !== "jira") {
             return true;
           }
-          const jiraStatus = (
-            ((i.metadata as Record<string, unknown>)?.status as string) || ""
-          ).toLowerCase();
+          const jiraStatus = ((i.metadata?.status as string) || "").toLowerCase();
           return !excluded.has(jiraStatus);
         });
       }
@@ -101,9 +99,7 @@ export function createServer() {
           if (i.source !== "github") {
             return true;
           }
-          const reason = (
-            ((i.metadata as Record<string, unknown>)?.reason as string) || ""
-          ).toLowerCase();
+          const reason = ((i.metadata?.reason as string) || "").toLowerCase();
           return !excl.has(reason);
         });
       }
