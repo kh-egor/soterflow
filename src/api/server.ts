@@ -29,7 +29,7 @@ export function createServer() {
   });
 
   app.use(express.json());
-  app.use(authMiddleware as any);
+  app.use(authMiddleware as express.RequestHandler);
 
   // --- Health ---
   app.get("/api/health", (_req, res) => {
@@ -47,8 +47,9 @@ export function createServer() {
         items = getInbox({ source, type, status });
       }
       res.json({ ok: true, data: items });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -61,8 +62,9 @@ export function createServer() {
         return;
       }
       res.json({ ok: true, data: item });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -102,8 +104,9 @@ export function createServer() {
       await channel.disconnect();
 
       res.json({ ok: true, data: { id: item.id, action } });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -114,8 +117,9 @@ export function createServer() {
       const { stats } = await syncAll(channels);
       broadcast(wss, { type: "sync_complete", stats });
       res.json({ ok: true, data: stats });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -124,8 +128,9 @@ export function createServer() {
       const states = getAllSyncStates();
       const configured = getConfiguredChannels();
       res.json({ ok: true, data: { syncStates: states, channels: configured } });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
     }
   });
 
@@ -148,7 +153,29 @@ export function createServer() {
   return { app, server, wss };
 }
 
-function broadcast(wss: WebSocketServer, data: any) {
+/**
+ * Graceful shutdown: close all WebSocket connections, stop the HTTP server, close the DB.
+ */
+export async function gracefulShutdown(server: http.Server, wss: WebSocketServer): Promise<void> {
+  const { closeDb } = await import("../store/db.js");
+
+  // Close all WS connections
+  for (const client of wss.clients) {
+    client.close(1001, "Server shutting down");
+  }
+  wss.close();
+
+  // Close HTTP server
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+
+  // Close database
+  closeDb();
+  console.log("[soterflow] Graceful shutdown complete.");
+}
+
+function broadcast(wss: WebSocketServer, data: Record<string, unknown>) {
   const msg = JSON.stringify(data);
   for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {

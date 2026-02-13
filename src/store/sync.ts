@@ -18,14 +18,16 @@ export interface SyncState {
  */
 export function getSyncState(channelName: string): SyncState | null {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM sync_state WHERE channel_name = ?").get(channelName) as any;
+  const row = db.prepare("SELECT * FROM sync_state WHERE channel_name = ?").get(channelName) as
+    | Record<string, unknown>
+    | undefined;
   if (!row) {
     return null;
   }
   return {
-    channelName: row.channel_name,
-    lastSync: new Date(row.last_sync),
-    cursor: row.cursor,
+    channelName: row.channel_name as string,
+    lastSync: new Date(row.last_sync as string),
+    cursor: row.cursor as string | null,
   };
 }
 
@@ -50,10 +52,13 @@ export function updateSyncState(channelName: string, cursor?: string | null): vo
  */
 export function getAllSyncStates(): SyncState[] {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM sync_state ORDER BY last_sync DESC").all() as any[];
+  const rows = db.prepare("SELECT * FROM sync_state ORDER BY last_sync DESC").all() as Record<
+    string,
+    unknown
+  >[];
   return rows.map((r) => ({
-    channelName: r.channel_name,
-    lastSync: new Date(r.last_sync),
-    cursor: r.cursor,
+    channelName: r.channel_name as string,
+    lastSync: new Date(r.last_sync as string),
+    cursor: r.cursor as string | null,
   }));
 }

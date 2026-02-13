@@ -72,7 +72,7 @@ export function upsert(item: WorkItem): void {
 export function getAll(filters?: WorkItemFilters): WorkItem[] {
   const db = getDb();
   const conditions: string[] = [];
-  const params: any[] = [];
+  const params: string[] = [];
 
   if (filters?.source) {
     conditions.push("source = ?");
@@ -90,7 +90,7 @@ export function getAll(filters?: WorkItemFilters): WorkItem[] {
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = db
     .prepare(`SELECT * FROM workitems ${where} ORDER BY timestamp DESC`)
-    .all(...params) as any[];
+    .all(...params) as Record<string, unknown>[];
 
   return rows.map(rowToWorkItem);
 }
@@ -121,23 +121,23 @@ export function search(query: string): WorkItem[] {
     WHERE workitems_fts MATCH ?
     ORDER BY rank
   `)
-    .all(query) as any[];
+    .all(query) as Record<string, unknown>[];
 
   return rows.map(rowToWorkItem);
 }
 
-function rowToWorkItem(row: any): WorkItem {
+function rowToWorkItem(row: Record<string, unknown>): WorkItem {
   return {
-    id: row.id,
-    source: row.source,
-    type: row.type,
-    title: row.title,
-    body: row.body,
-    author: row.author,
-    timestamp: new Date(row.timestamp),
-    priority: row.priority,
-    url: row.url,
-    metadata: JSON.parse(row.metadata),
-    status: row.status,
+    id: row.id as string,
+    source: row.source as string,
+    type: row.type as WorkItem["type"],
+    title: row.title as string,
+    body: row.body as string,
+    author: row.author as string,
+    timestamp: new Date(row.timestamp as string),
+    priority: row.priority as WorkItem["priority"],
+    url: row.url as string,
+    metadata: JSON.parse(row.metadata as string),
+    status: row.status as WorkItem["status"],
   };
 }
