@@ -1,11 +1,13 @@
 /**
  * @module channels/jira
- * Jira channel connector — fetches assigned/mentioned issues via REST API.
+ * Jira channel connector — fetches assigned, mentioned, watched, and recently updated issues via REST API v3.
+ * Features: pagination via startAt/maxResults, exponential backoff retries, priority mapping.
  */
 
 import { BaseChannel, WorkItem } from "./base";
+import { withRetry } from "./retry";
 
-interface JiraIssue {
+export interface JiraIssue {
   id: string;
   key: string;
   self: string;
@@ -24,12 +26,15 @@ interface JiraIssue {
   };
 }
 
+const SEARCH_FIELDS =
+  "summary,description,assignee,reporter,status,priority,updated,created,issuetype";
+const PAGE_SIZE = 50;
+
 export class JiraChannel extends BaseChannel {
   name = "jira";
   private baseUrl = "";
   private auth = "";
 
-  /** Connect using JIRA_URL, JIRA_EMAIL, JIRA_TOKEN from environment. */
   async connect(): Promise<void> {
     const url = process.env.JIRA_URL;
     const email = process.env.JIRA_EMAIL;
@@ -50,69 +55,68 @@ export class JiraChannel extends BaseChannel {
   }
 
   private async request(path: string, options?: RequestInit): Promise<any> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Basic ${this.auth}`,
-        "Content-Type": "application/json",
-        ...options?.headers,
-      },
-    });
-    if (!res.ok) {
-      throw new Error(`Jira API error: ${res.status} ${res.statusText}`);
-    }
-    return res.json();
-  }
-
-  /** Fetch assigned issues and recently updated issues mentioning the user. */
-  async sync(): Promise<WorkItem[]> {
-    const myself = await this.request("/rest/api/3/myself");
-    const jql = `assignee = currentUser() OR watcher = currentUser() ORDER BY updated DESC`;
-    const data = await this.request(
-      `/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=summary,description,assignee,reporter,status,priority,updated,created,issuetype`,
-    );
-
-    return (data.issues as JiraIssue[]).map(
-      (issue): WorkItem => ({
-        id: `jira-${issue.key}`,
-        source: "jira",
-        type: issue.fields.issuetype.name.toLowerCase() === "task" ? "task" : "issue",
-        title: `[${issue.key}] ${issue.fields.summary}`,
-        body: issue.fields.description ?? "",
-        author: issue.fields.reporter?.displayName ?? "unknown",
-        timestamp: new Date(issue.fields.updated),
-        priority: this.mapPriority(issue.fields.priority?.name),
-        url: `${this.baseUrl}/browse/${issue.key}`,
-        metadata: {
-          key: issue.key,
-          status: issue.fields.status.name,
-          assignee: issue.fields.assignee?.displayName,
-          issueType: issue.fields.issuetype.name,
+    return withRetry(async () => {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        ...options,
+        headers: {
+          Authorization: `Basic ${this.auth}`,
+          "Content-Type": "application/json",
+          ...options?.headers,
         },
-        status: "new",
-      }),
-    );
+      });
+      if (!res.ok) {
+        const err: any = new Error(`Jira API error: ${res.status} ${res.statusText}`);
+        err.status = res.status;
+        err.response = { headers: res.headers };
+        throw err;
+      }
+      return res.json();
+    });
   }
 
-  private mapPriority(jiraPriority?: string): WorkItem["priority"] {
-    switch (jiraPriority?.toLowerCase()) {
-      case "highest":
-      case "blocker":
-        return "urgent";
-      case "high":
-        return "high";
-      case "low":
-      case "lowest":
-        return "low";
-      default:
-        return "normal";
+  /** Paginated JQL search returning all matching issues. */
+  private async searchAll(jql: string): Promise<JiraIssue[]> {
+    const issues: JiraIssue[] = [];
+    let startAt = 0;
+    while (true) {
+      const data = await this.request(
+        `/rest/api/3/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${PAGE_SIZE}&fields=${SEARCH_FIELDS}`,
+      );
+      issues.push(...(data.issues as JiraIssue[]));
+      if (startAt + data.maxResults >= data.total || data.issues.length === 0) {
+        break;
+      }
+      startAt += data.maxResults;
     }
+    return issues;
   }
 
-  /**
-   * Perform an action on a Jira issue.
-   * Supported actions: transition, comment, assign.
-   */
+  async sync(): Promise<WorkItem[]> {
+    const seen = new Set<string>();
+    const items: WorkItem[] = [];
+
+    const addIssues = (issues: JiraIssue[]) => {
+      for (const issue of issues) {
+        if (seen.has(issue.key)) {
+          continue;
+        }
+        seen.add(issue.key);
+        items.push(mapJiraIssue(issue, this.baseUrl));
+      }
+    };
+
+    // 1. Assigned issues
+    addIssues(await this.searchAll(buildJql("assigned")));
+    // 2. Watched issues
+    addIssues(await this.searchAll(buildJql("watched")));
+    // 3. Mentioned (text search — current user's email in text)
+    addIssues(await this.searchAll(buildJql("mentioned")));
+    // 4. Recently updated (last 7 days)
+    addIssues(await this.searchAll(buildJql("recent")));
+
+    return items;
+  }
+
   async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
     const key = (params?.key as string) ?? itemId.replace("jira-", "");
 
@@ -147,4 +151,61 @@ export class JiraChannel extends BaseChannel {
         throw new Error(`Unsupported Jira action: ${action}`);
     }
   }
+}
+
+// --- Exported helpers for testability ---
+
+/** Build JQL for different query types */
+export function buildJql(type: "assigned" | "watched" | "mentioned" | "recent"): string {
+  switch (type) {
+    case "assigned":
+      return "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+    case "watched":
+      return "watcher = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+    case "mentioned":
+      return 'text ~ "currentUser()" AND resolution = Unresolved ORDER BY updated DESC';
+    case "recent":
+      return "updated >= -7d AND (assignee = currentUser() OR watcher = currentUser()) ORDER BY updated DESC";
+  }
+}
+
+/** Map Jira priority name to WorkItem priority */
+export function mapJiraPriority(jiraPriority?: string): WorkItem["priority"] {
+  switch (jiraPriority?.toLowerCase()) {
+    case "highest":
+    case "blocker":
+    case "critical":
+      return "urgent";
+    case "high":
+    case "major":
+      return "high";
+    case "low":
+    case "lowest":
+    case "trivial":
+      return "low";
+    default:
+      return "normal";
+  }
+}
+
+/** Map a Jira issue to a WorkItem */
+export function mapJiraIssue(issue: JiraIssue, baseUrl: string): WorkItem {
+  return {
+    id: `jira-${issue.key}`,
+    source: "jira",
+    type: issue.fields.issuetype.name.toLowerCase() === "task" ? "task" : "issue",
+    title: `[${issue.key}] ${issue.fields.summary}`,
+    body: issue.fields.description ?? "",
+    author: issue.fields.reporter?.displayName ?? "unknown",
+    timestamp: new Date(issue.fields.updated),
+    priority: mapJiraPriority(issue.fields.priority?.name),
+    url: `${baseUrl}/browse/${issue.key}`,
+    metadata: {
+      key: issue.key,
+      status: issue.fields.status.name,
+      assignee: issue.fields.assignee?.displayName,
+      issueType: issue.fields.issuetype.name,
+    },
+    status: "new",
+  };
 }

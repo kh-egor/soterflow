@@ -6,14 +6,9 @@
 
 import { Octokit } from "@octokit/rest";
 import { BaseChannel, WorkItem } from "./base";
+import { withRetry, sleep } from "./retry";
 
-const MAX_RETRIES = 3;
 const RATE_LIMIT_THRESHOLD = 10; // back off when remaining < this
-
-/** Sleep helper */
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 export class GitHubChannel extends BaseChannel {
   name = "github";
@@ -36,33 +31,14 @@ export class GitHubChannel extends BaseChannel {
   }
 
   /** Retry wrapper with exponential backoff and rate-limit awareness. */
-  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        const result = await fn();
-        return result;
-      } catch (err: any) {
+  private withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    return withRetry(fn, {
+      isRetryable: (err: any) => {
         const status = err?.status ?? err?.response?.status;
         const isRateLimit = status === 403 && /rate limit/i.test(err?.message ?? "");
-        const isServerError = status >= 500;
-        const isRetryable = isRateLimit || isServerError || err?.code === "ECONNRESET";
-
-        if (!isRetryable || attempt === MAX_RETRIES - 1) {
-          throw err;
-        }
-
-        if (isRateLimit) {
-          const resetHeader = err?.response?.headers?.["x-ratelimit-reset"];
-          const waitMs = resetHeader
-            ? Math.max(0, Number(resetHeader) * 1000 - Date.now()) + 1000
-            : 60_000;
-          await sleep(Math.min(waitMs, 120_000));
-        } else {
-          await sleep(1000 * 2 ** attempt);
-        }
-      }
-    }
-    throw new Error("withRetry: unreachable");
+        return isRateLimit || status >= 500 || err?.code === "ECONNRESET";
+      },
+    });
   }
 
   /** Check rate limit after a response, sleep if low. */
