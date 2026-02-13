@@ -547,7 +547,7 @@
               <span>${i.type}</span>
               <span>${timeAgo(i.timestamp)}</span>
             </div>
-            <div class="card-body">${esc(i.body?.slice(0, 100) || "")}</div>
+            <div class="card-body">${esc(i.metadata?.reasonText || i.metadata?.status || i.body?.slice(0, 100) || "")}</div>
           </div>
         `,
           )
@@ -603,11 +603,39 @@
         btn.textContent = "🔄 Sync";
       }
 
+      function getStatusInfo(item) {
+        const m = item.metadata || {};
+        const parts = [];
+        if (m.status) parts.push("📋 Status: <b>" + esc(m.status) + "</b>");
+        if (m.reasonText) parts.push("💡 " + esc(m.reasonText));
+        if (m.repo) parts.push("📂 " + esc(m.repo));
+        if (m.assignee) parts.push("👤 Assigned: " + esc(m.assignee));
+        if (m.issueType) parts.push("🏷 Type: " + esc(m.issueType));
+        if (m.channelName) parts.push("💬 #" + esc(m.channelName));
+        if (m.isDM) parts.push("💬 Direct message");
+        if (item.status && item.status !== "new") parts.push("📌 " + item.status.replace("_", " "));
+        return parts.join("<br>");
+      }
+
+      function getMetaDetails(item) {
+        const parts = [];
+        if (item.author && item.author !== "unknown") parts.push("By " + esc(item.author));
+        const d = new Date(item.timestamp);
+        parts.push(
+          d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) +
+            " at " +
+            d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+        );
+        return parts.join(" · ");
+      }
+
       function showDetail(id) {
         const item = allItems.find((i) => i.id === id);
         if (!item) return;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
         const actions = getActions(item);
+        const statusInfo = getStatusInfo(item);
+        const metaDetails = getMetaDetails(item);
         document.getElementById("detail-content").innerHTML = `
           <div class="card-meta" style="margin-bottom:8px">
             <span class="source-icon">${sourceIcon(item.source)}</span>
@@ -615,8 +643,9 @@
             <span>${item.source} · ${item.type} · ${timeAgo(item.timestamp)}</span>
           </div>
           <div class="detail-title">${esc(item.title)}</div>
-          <div class="detail-meta">By ${esc(item.author)}</div>
-          <div class="detail-body">${esc(item.body || "No content")}</div>
+          ${statusInfo ? '<div style="background:var(--secondary-bg);border-radius:8px;padding:10px;margin:8px 0;font-size:13px">' + statusInfo + "</div>" : ""}
+          ${metaDetails ? '<div style="font-size:13px;color:var(--hint);margin-bottom:8px">' + metaDetails + "</div>" : ""}
+          <div class="detail-body">${esc(item.body || "")}</div>
           ${item.url ? '<a href="' + esc(item.url) + '" target="_blank" style="color:var(--link);font-size:13px;display:block;margin-bottom:16px">Open in ' + item.source + " →</a>" : ""}
           <div class="detail-actions">
             ${actions.map((a) => `<button class="action-btn${a.primary ? " primary" : ""}" onclick="doAction('${item.id}','${a.action}')">${a.label}</button>`).join("")}

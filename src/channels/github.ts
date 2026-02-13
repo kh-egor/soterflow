@@ -205,17 +205,49 @@ export function assignPriority(item: {
 }
 
 export function mapNotification(n: any): WorkItem {
+  // Convert API URL to web URL
+  const apiUrl: string = n.subject.url ?? "";
+  const webUrl = apiUrl
+    .replace("https://api.github.com/repos/", "https://github.com/")
+    .replace("/pulls/", "/pull/");
+
+  // Human-readable reason
+  const reasonMap: Record<string, string> = {
+    author: "You authored this",
+    assign: "Assigned to you",
+    review_requested: "Review requested",
+    mention: "You were mentioned",
+    comment: "New comment",
+    ci_activity: "CI activity",
+    security_alert: "Security alert",
+    state_change: "State changed",
+    subscribed: "Subscribed",
+    team_mention: "Team mentioned",
+  };
+  const reasonText = reasonMap[n.reason] ?? n.reason;
+
   return {
     id: `github-notif-${n.id}`,
     source: "github",
-    type: "notification",
+    type:
+      n.subject.type === "PullRequest"
+        ? "pr"
+        : n.subject.type === "Issue"
+          ? "issue"
+          : "notification",
     title: n.subject.title,
-    body: n.reason,
-    author: n.repository.full_name,
+    body: `${reasonText} · ${n.repository.full_name} · ${n.subject.type}`,
+    author: n.repository.full_name.split("/")[1] ?? n.repository.full_name,
     timestamp: new Date(n.updated_at),
     priority: assignPriority({ reason: n.reason }),
-    url: n.subject.url ?? `https://github.com/${n.repository.full_name}`,
-    metadata: { reason: n.reason, subjectType: n.subject.type, threadId: n.id },
+    url: webUrl || `https://github.com/${n.repository.full_name}`,
+    metadata: {
+      reason: n.reason,
+      reasonText,
+      subjectType: n.subject.type,
+      threadId: n.id,
+      repo: n.repository.full_name,
+    },
     status: "new",
   };
 }
