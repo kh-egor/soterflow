@@ -5,6 +5,7 @@
 
 import { BaseChannel, WorkItem } from "../channels/base.js";
 import { GitHubChannel } from "../channels/github.js";
+import { GmailChannel } from "../channels/gmail.js";
 import { JiraChannel } from "../channels/jira.js";
 import { SlackChannel } from "../channels/slack.js";
 import { env } from "../soterflow-env.js";
@@ -36,6 +37,9 @@ export function createChannels(): BaseChannel[] {
   if (env.SLACK_TOKEN) {
     channels.push(new SlackChannel());
   }
+  if (env.GMAIL_USER && env.GMAIL_APP_PASSWORD) {
+    channels.push(new GmailChannel());
+  }
 
   return channels;
 }
@@ -48,6 +52,7 @@ export function getConfiguredChannels(): Array<{ name: string; configured: boole
     { name: "github", configured: !!env.GITHUB_TOKEN },
     { name: "jira", configured: !!(env.JIRA_URL && env.JIRA_EMAIL && env.JIRA_TOKEN) },
     { name: "slack", configured: !!env.SLACK_TOKEN },
+    { name: "gmail", configured: !!(env.GMAIL_USER && env.GMAIL_APP_PASSWORD) },
   ];
 }
 
