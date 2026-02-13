@@ -162,6 +162,42 @@ export class JiraChannel extends BaseChannel {
 
 // --- Exported helpers for testability ---
 
+/** Extract plain text from Jira's Atlassian Document Format (ADF) or return string as-is. */
+function extractAdfText(desc: unknown): string {
+  if (!desc) {
+    return "";
+  }
+  if (typeof desc === "string") {
+    return desc;
+  }
+  if (typeof desc !== "object") {
+    return String(desc);
+  }
+
+  const extract = (node: unknown): string => {
+    if (!node || typeof node !== "object") {
+      return "";
+    }
+    const n = node as Record<string, unknown>;
+    if (n.type === "text" && typeof n.text === "string") {
+      return n.text;
+    }
+    if (Array.isArray(n.content)) {
+      return (n.content as unknown[]).map(extract).join("");
+    }
+    return "";
+  };
+
+  const doc = desc as Record<string, unknown>;
+  if (Array.isArray(doc.content)) {
+    return (doc.content as unknown[])
+      .map((block) => extract(block))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
 /** Build JQL for different query types */
 export function buildJql(type: "assigned" | "watched" | "mentioned" | "recent", days = 7): string {
   const timeFilter = `updated >= -${days}d`;
@@ -203,12 +239,7 @@ export function mapJiraIssue(issue: JiraIssue, baseUrl: string): WorkItem {
     source: "jira",
     type: issue.fields.issuetype.name.toLowerCase() === "task" ? "task" : "issue",
     title: `[${issue.key}] ${issue.fields.summary}`,
-    body:
-      typeof issue.fields.description === "string"
-        ? issue.fields.description
-        : issue.fields.description
-          ? JSON.stringify(issue.fields.description)
-          : "",
+    body: extractAdfText(issue.fields.description),
     author: issue.fields.reporter?.displayName ?? "unknown",
     timestamp: new Date(issue.fields.updated),
     priority: mapJiraPriority(issue.fields.priority?.name),
