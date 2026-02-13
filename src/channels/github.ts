@@ -1,153 +1,297 @@
 /**
  * @module channels/github
  * GitHub channel connector — fetches notifications, assigned issues, review-requested PRs, and mentions.
+ * Features: pagination, rate-limit handling, exponential backoff retries.
  */
 
 import { Octokit } from "@octokit/rest";
 import { BaseChannel, WorkItem } from "./base";
 
+const MAX_RETRIES = 3;
+const RATE_LIMIT_THRESHOLD = 10; // back off when remaining < this
+
+/** Sleep helper */
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export class GitHubChannel extends BaseChannel {
   name = "github";
   private octokit: Octokit | null = null;
+  private username = "";
 
-  /** Connect to GitHub using GITHUB_TOKEN from environment. */
   async connect(): Promise<void> {
     const token = process.env.GITHUB_TOKEN;
     if (!token) {
       throw new Error("GITHUB_TOKEN is not set");
     }
     this.octokit = new Octokit({ auth: token });
-    // Verify auth
-    await this.octokit.users.getAuthenticated();
+    const { data } = await this.octokit.users.getAuthenticated();
+    this.username = data.login;
   }
 
   async disconnect(): Promise<void> {
     this.octokit = null;
+    this.username = "";
   }
 
-  /** Fetch notifications, assigned issues, and review-requested PRs. */
+  /** Retry wrapper with exponential backoff and rate-limit awareness. */
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const result = await fn();
+        return result;
+      } catch (err: any) {
+        const status = err?.status ?? err?.response?.status;
+        const isRateLimit = status === 403 && /rate limit/i.test(err?.message ?? "");
+        const isServerError = status >= 500;
+        const isRetryable = isRateLimit || isServerError || err?.code === "ECONNRESET";
+
+        if (!isRetryable || attempt === MAX_RETRIES - 1) {
+          throw err;
+        }
+
+        if (isRateLimit) {
+          const resetHeader = err?.response?.headers?.["x-ratelimit-reset"];
+          const waitMs = resetHeader
+            ? Math.max(0, Number(resetHeader) * 1000 - Date.now()) + 1000
+            : 60_000;
+          await sleep(Math.min(waitMs, 120_000));
+        } else {
+          await sleep(1000 * 2 ** attempt);
+        }
+      }
+    }
+    throw new Error("withRetry: unreachable");
+  }
+
+  /** Check rate limit after a response, sleep if low. */
+  private async checkRateLimit(): Promise<void> {
+    if (!this.octokit) {
+      return;
+    }
+    try {
+      const { data } = await this.octokit.rateLimit.get();
+      const core = data.resources.core;
+      if (core.remaining < RATE_LIMIT_THRESHOLD) {
+        const waitMs = Math.max(0, core.reset * 1000 - Date.now()) + 1000;
+        await sleep(Math.min(waitMs, 120_000));
+      }
+    } catch {
+      // non-critical
+    }
+  }
+
   async sync(): Promise<WorkItem[]> {
     if (!this.octokit) {
       throw new Error("Not connected — call connect() first");
     }
+
     const items: WorkItem[] = [];
 
-    // 1. Notifications
-    const { data: notifications } =
-      await this.octokit.activity.listNotificationsForAuthenticatedUser({
+    // 1. Notifications (paginated)
+    const notifications = await this.withRetry(() =>
+      this.octokit!.paginate(this.octokit!.activity.listNotificationsForAuthenticatedUser, {
         all: false,
-        per_page: 50,
-      });
+        per_page: 100,
+      }),
+    );
     for (const n of notifications) {
-      items.push({
-        id: `github-notif-${n.id}`,
-        source: "github",
-        type: "notification",
-        title: n.subject.title,
-        body: n.reason,
-        author: n.repository.full_name,
-        timestamp: new Date(n.updated_at),
-        priority: "normal",
-        url: n.subject.url ?? `https://github.com/${n.repository.full_name}`,
-        metadata: { reason: n.reason, subjectType: n.subject.type, threadId: n.id },
-        status: "new",
-      });
+      items.push(mapNotification(n));
     }
 
-    // 2. Assigned issues
-    const { data: issues } = await this.octokit.issues.list({
-      filter: "assigned",
-      state: "open",
-      per_page: 50,
-    });
+    await this.checkRateLimit();
+
+    // 2. Assigned issues (paginated)
+    const issues = await this.withRetry(() =>
+      this.octokit!.paginate(this.octokit!.issues.list, {
+        filter: "assigned",
+        state: "open",
+        per_page: 100,
+      }),
+    );
     for (const issue of issues) {
       if (issue.pull_request) {
         continue;
-      } // skip PRs here
-      items.push({
-        id: `github-issue-${issue.id}`,
-        source: "github",
-        type: "issue",
-        title: issue.title,
-        body: issue.body ?? "",
-        author: issue.user?.login ?? "unknown",
-        timestamp: new Date(issue.updated_at),
-        priority: "normal",
-        url: issue.html_url,
-        metadata: {
-          number: issue.number,
-          labels: issue.labels.map((l: any) => (typeof l === "string" ? l : l.name)),
-          repo: issue.repository?.full_name,
-        },
-        status: "new",
-      });
+      }
+      items.push(mapIssue(issue));
     }
 
-    // 3. PRs where review is requested
-    const { data: viewer } = await this.octokit.users.getAuthenticated();
-    const { data: reviewPrs } = await this.octokit.search.issuesAndPullRequests({
-      q: `is:pr is:open review-requested:${viewer.login}`,
-      per_page: 50,
-    });
-    for (const pr of reviewPrs.items) {
-      items.push({
-        id: `github-pr-${pr.id}`,
-        source: "github",
-        type: "pr",
-        title: pr.title,
-        body: pr.body ?? "",
-        author: pr.user?.login ?? "unknown",
-        timestamp: new Date(pr.updated_at),
-        priority: "high",
-        url: pr.html_url,
-        metadata: { number: pr.number },
-        status: "new",
-      });
+    await this.checkRateLimit();
+
+    // 3. PRs where review is requested (search, paginated)
+    const reviewPrs = await this.withRetry(() =>
+      this.octokit!.paginate(this.octokit!.search.issuesAndPullRequests, {
+        q: `is:pr is:open review-requested:${this.username}`,
+        per_page: 100,
+      }),
+    );
+    for (const pr of reviewPrs) {
+      items.push(mapPR(pr));
+    }
+
+    await this.checkRateLimit();
+
+    // 4. Mentions in issues/PRs
+    const mentions = await this.withRetry(() =>
+      this.octokit!.paginate(this.octokit!.search.issuesAndPullRequests, {
+        q: `mentions:${this.username} is:open`,
+        per_page: 100,
+      }),
+    );
+    for (const m of mentions) {
+      // avoid duplicates
+      const id = m.pull_request ? `github-pr-${m.id}` : `github-issue-${m.id}`;
+      if (!items.some((i) => i.id === id)) {
+        items.push(mapMention(m));
+      }
     }
 
     return items;
   }
 
-  /**
-   * Perform an action on a GitHub work item.
-   * Supported actions: close, merge, approve, comment.
-   */
   async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
     if (!this.octokit) {
       throw new Error("Not connected");
     }
     const meta = params ?? {};
-
     const owner = meta.owner as string;
     const repo = meta.repo as string;
     const number = meta.number as number;
 
-    switch (action) {
-      case "close":
-        await this.octokit.issues.update({ owner, repo, issue_number: number, state: "closed" });
-        break;
-      case "merge":
-        await this.octokit.pulls.merge({ owner, repo, pull_number: number });
-        break;
-      case "approve":
-        await this.octokit.pulls.createReview({
-          owner,
-          repo,
-          pull_number: number,
-          event: "APPROVE",
-          body: meta.body ?? "",
-        });
-        break;
-      case "comment":
-        await this.octokit.issues.createComment({
-          owner,
-          repo,
-          issue_number: number,
-          body: meta.body as string,
-        });
-        break;
-      default:
-        throw new Error(`Unsupported GitHub action: ${action}`);
-    }
+    await this.withRetry(async () => {
+      switch (action) {
+        case "close":
+          await this.octokit!.issues.update({ owner, repo, issue_number: number, state: "closed" });
+          break;
+        case "merge":
+          await this.octokit!.pulls.merge({ owner, repo, pull_number: number });
+          break;
+        case "approve":
+          await this.octokit!.pulls.createReview({
+            owner,
+            repo,
+            pull_number: number,
+            event: "APPROVE",
+            body: meta.body ?? "",
+          });
+          break;
+        case "comment":
+          await this.octokit!.issues.createComment({
+            owner,
+            repo,
+            issue_number: number,
+            body: meta.body as string,
+          });
+          break;
+        default:
+          throw new Error(`Unsupported GitHub action: ${action}`);
+      }
+    });
   }
+}
+
+// --- Mapping helpers (exported for testing) ---
+
+export function assignPriority(item: {
+  labels?: any[];
+  reason?: string;
+  isPR?: boolean;
+  isReviewRequest?: boolean;
+}): WorkItem["priority"] {
+  const labelNames: string[] = (item.labels ?? []).map((l: any) =>
+    typeof l === "string" ? l.toLowerCase() : (l.name ?? "").toLowerCase(),
+  );
+
+  if (labelNames.some((l) => l.includes("urgent") || l.includes("critical") || l === "p0")) {
+    return "urgent";
+  }
+  if (
+    labelNames.some((l) => l.includes("high") || l === "p1") ||
+    item.reason === "security_alert"
+  ) {
+    return "urgent";
+  }
+  if (item.isReviewRequest || item.reason === "review_requested") {
+    return "high";
+  }
+  if (item.reason === "assign" || item.reason === "mention") {
+    return "high";
+  }
+  if (labelNames.some((l) => l.includes("low") || l === "p3")) {
+    return "low";
+  }
+  return "normal";
+}
+
+export function mapNotification(n: any): WorkItem {
+  return {
+    id: `github-notif-${n.id}`,
+    source: "github",
+    type: "notification",
+    title: n.subject.title,
+    body: n.reason,
+    author: n.repository.full_name,
+    timestamp: new Date(n.updated_at),
+    priority: assignPriority({ reason: n.reason }),
+    url: n.subject.url ?? `https://github.com/${n.repository.full_name}`,
+    metadata: { reason: n.reason, subjectType: n.subject.type, threadId: n.id },
+    status: "new",
+  };
+}
+
+export function mapIssue(issue: any): WorkItem {
+  return {
+    id: `github-issue-${issue.id}`,
+    source: "github",
+    type: "issue",
+    title: issue.title,
+    body: issue.body ?? "",
+    author: issue.user?.login ?? "unknown",
+    timestamp: new Date(issue.updated_at),
+    priority: assignPriority({ labels: issue.labels, reason: "assign" }),
+    url: issue.html_url,
+    metadata: {
+      number: issue.number,
+      labels: (issue.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
+      repo: issue.repository?.full_name,
+    },
+    status: "new",
+  };
+}
+
+export function mapPR(pr: any): WorkItem {
+  return {
+    id: `github-pr-${pr.id}`,
+    source: "github",
+    type: "pr",
+    title: pr.title,
+    body: pr.body ?? "",
+    author: pr.user?.login ?? "unknown",
+    timestamp: new Date(pr.updated_at),
+    priority: assignPriority({ isReviewRequest: true, labels: pr.labels }),
+    url: pr.html_url,
+    metadata: { number: pr.number },
+    status: "new",
+  };
+}
+
+export function mapMention(m: any): WorkItem {
+  const isPR = !!m.pull_request;
+  return {
+    id: isPR ? `github-pr-${m.id}` : `github-issue-${m.id}`,
+    source: "github",
+    type: isPR ? "pr" : "issue",
+    title: m.title,
+    body: m.body ?? "",
+    author: m.user?.login ?? "unknown",
+    timestamp: new Date(m.updated_at),
+    priority: assignPriority({ labels: m.labels, reason: "mention" }),
+    url: m.html_url,
+    metadata: {
+      number: m.number,
+      labels: (m.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
+    },
+    status: "new",
+  };
 }
