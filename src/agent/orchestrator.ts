@@ -10,6 +10,7 @@ import { SlackChannel } from "../channels/slack.js";
 import { env } from "../soterflow-env.js";
 import { updateSyncState } from "../store/sync.js";
 import { upsert, getAll } from "../store/workitems.js";
+import { Director } from "./director.js";
 
 /** Stats from a sync run. */
 export interface SyncStats {
@@ -100,6 +101,12 @@ export async function syncAll(
       }
 
       updateSyncState(channel.name);
+      try {
+        Director.getInstance().log(
+          "info",
+          `Sync completed: ${items.length} items from ${channel.name}`,
+        );
+      } catch {}
     } catch (err) {
       console.error(`[soterflow] Failed to sync ${channel.name}:`, err);
       try {

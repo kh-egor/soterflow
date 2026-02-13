@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkItem } from "../channels/base.js";
+import { Director } from "../agent/director.js";
 import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
 import { env } from "../soterflow-env.js";
 import { getAllSyncStates } from "../store/sync.js";
@@ -188,6 +189,66 @@ export function createServer() {
   app.post("/api/config/channels", (_req, res) => {
     // Placeholder — writing to .env is risky; just acknowledge for now
     res.status(501).json({ ok: false, error: "Channel config update not yet implemented" });
+  });
+
+  // --- Director ---
+  const director = Director.getInstance();
+
+  app.get("/api/director/skills", (_req, res) => {
+    res.json({ ok: true, data: director.getSkills() });
+  });
+
+  app.get("/api/director/agents", (_req, res) => {
+    res.json({ ok: true, data: director.getAgents() });
+  });
+
+  app.get("/api/director/agents/:id", (req, res) => {
+    const agent = director.getAgent(req.params.id);
+    if (!agent) {
+      res.status(404).json({ ok: false, error: "Not found" });
+      return;
+    }
+    res.json({ ok: true, data: agent });
+  });
+
+  app.post("/api/director/dispatch", (req, res) => {
+    try {
+      const { workItemId, skill } = req.body ?? {};
+      if (!workItemId || !skill) {
+        res.status(400).json({ ok: false, error: "workItemId and skill required" });
+        return;
+      }
+      const agent = director.dispatch(workItemId, skill);
+      broadcast(wss, { type: "director_dispatch", agent });
+      res.json({ ok: true, data: agent });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(400).json({ ok: false, error: msg });
+    }
+  });
+
+  app.get("/api/director/logs", (req, res) => {
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+    res.json({ ok: true, data: director.getLogs(limit) });
+  });
+
+  app.get("/api/director/memory", (_req, res) => {
+    res.json({ ok: true, data: director.getMemory() });
+  });
+
+  app.post("/api/director/memory", (req, res) => {
+    const { key, value } = req.body ?? {};
+    if (!key || value === undefined) {
+      res.status(400).json({ ok: false, error: "key and value required" });
+      return;
+    }
+    director.setMemory(key, value);
+    res.json({ ok: true });
+  });
+
+  app.delete("/api/director/memory/:key", (req, res) => {
+    director.deleteMemory(req.params.key);
+    res.json({ ok: true });
   });
 
   // --- WebSocket ---

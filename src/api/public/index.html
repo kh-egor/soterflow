@@ -372,6 +372,84 @@
         <div id="settings-list"><div class="loading">Loading...</div></div>
       </div>
 
+      <!-- DIRECTOR PAGE -->
+      <div id="page-director" class="page">
+        <h1>🎯 Director</h1>
+        <p class="subtitle">Sub-agent orchestration</p>
+
+        <!-- Dispatch -->
+        <div id="dispatch-section" style="margin-bottom: 16px">
+          <button class="sync-btn" onclick="showDispatchForm()">➕ New Task</button>
+          <div id="dispatch-form" style="display: none; margin-top: 10px">
+            <div class="settings-group">
+              <div class="settings-label">Work Item</div>
+              <select id="dispatch-item" class="settings-select" style="width: 100%"></select>
+              <div class="settings-label" style="margin-top: 8px">Skill</div>
+              <select id="dispatch-skill" class="settings-select" style="width: 100%"></select>
+              <div style="margin-top: 10px; display: flex; gap: 8px">
+                <button class="action-btn primary" onclick="doDispatch()">🚀 Dispatch</button>
+                <button
+                  class="action-btn"
+                  onclick="document.getElementById('dispatch-form').style.display = 'none'"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-Agents -->
+        <h2 style="font-size: 15px; margin-bottom: 8px">🤖 Sub-Agents</h2>
+        <div id="agents-list"><div class="loading">Loading...</div></div>
+
+        <!-- Logs -->
+        <h2 style="font-size: 15px; margin: 16px 0 8px">📋 Logs</h2>
+        <div id="director-logs" style="max-height: 300px; overflow-y: auto"></div>
+
+        <!-- Memory -->
+        <h2 style="font-size: 15px; margin: 16px 0 8px">🧠 Memory</h2>
+        <button
+          class="sync-btn"
+          onclick="showMemoryAdd()"
+          style="margin-bottom: 8px; font-size: 12px; padding: 4px 10px"
+        >
+          + Add
+        </button>
+        <div id="memory-add-form" style="display: none; margin-bottom: 10px">
+          <div class="settings-group">
+            <input
+              id="mem-key"
+              placeholder="Key"
+              style="
+                width: 100%;
+                padding: 6px;
+                border-radius: 6px;
+                border: 1px solid var(--hint);
+                background: var(--secondary-bg);
+                color: var(--text);
+                margin-bottom: 6px;
+              "
+            />
+            <input
+              id="mem-val"
+              placeholder="Value"
+              style="
+                width: 100%;
+                padding: 6px;
+                border-radius: 6px;
+                border: 1px solid var(--hint);
+                background: var(--secondary-bg);
+                color: var(--text);
+                margin-bottom: 6px;
+              "
+            />
+            <button class="action-btn primary" onclick="doAddMemory()">Save</button>
+          </div>
+        </div>
+        <div id="memory-list"></div>
+      </div>
+
       <!-- TOOLS PAGE -->
       <div id="page-tools" class="page">
         <h1>🔧 Tools</h1>
@@ -387,6 +465,9 @@
       </div>
       <div class="nav-item" onclick="showPage('settings')">
         <span class="nav-icon">⚙️</span>Settings
+      </div>
+      <div class="nav-item" onclick="showPage('director')">
+        <span class="nav-icon">🎯</span>Director
       </div>
       <div class="nav-item" onclick="showPage('tools')"><span class="nav-icon">🔧</span>Tools</div>
     </div>
@@ -695,11 +776,13 @@
             "active",
             (name === "inbox" && i === 0) ||
               (name === "settings" && i === 1) ||
-              (name === "tools" && i === 2),
+              (name === "director" && i === 2) ||
+              (name === "tools" && i === 3),
           );
         });
         if (name === "settings") loadSettings();
         if (name === "tools") loadTools();
+        if (name === "director") loadDirector();
         if (name === "inbox" && tg?.BackButton) tg.BackButton.hide();
       }
 
@@ -721,6 +804,141 @@
           if (d.type === "sync_complete") loadInbox();
         };
       } catch (e) {}
+
+      // --- Director ---
+      let directorSkills = [];
+
+      async function loadDirector() {
+        await Promise.all([
+          loadAgents(),
+          loadDirectorLogs(),
+          loadMemory(),
+          loadSkillsForDispatch(),
+        ]);
+      }
+
+      async function loadSkillsForDispatch() {
+        const r = await api("/api/director/skills");
+        if (r.ok) directorSkills = r.data;
+      }
+
+      async function loadAgents() {
+        const r = await api("/api/director/agents");
+        const el = document.getElementById("agents-list");
+        if (!r.ok || !r.data.length) {
+          el.innerHTML = '<div class="empty" style="padding:20px">No sub-agents yet</div>';
+          return;
+        }
+        el.innerHTML = r.data
+          .map((a) => {
+            const badge =
+              { idle: "🟢", running: "🔵", completed: "✅", failed: "❌" }[a.status] || "⚪";
+            const time = a.startedAt ? timeAgo(a.startedAt) : "";
+            return `<div class="card" onclick="this.querySelector('.agent-detail').classList.toggle('visible')">
+            <div class="card-header"><span>${badge}</span><span class="card-title">${esc(a.name)}</span><span class="badge badge-normal">${a.skill}</span></div>
+            <div class="card-meta"><span>${a.status}</span><span>${time}</span></div>
+            ${a.task ? `<div class="card-body">Task: ${esc(a.task)}</div>` : ""}
+            <div class="agent-detail" style="display:none;margin-top:8px;font-size:12px;color:var(--hint)">
+              ${a.result ? `<div>Result: ${esc(a.result)}</div>` : ""}
+              ${a.error ? `<div style="color:#f44">Error: ${esc(a.error)}</div>` : ""}
+            </div>
+          </div>`;
+          })
+          .join("");
+        // make detail toggle work
+        el.querySelectorAll(".agent-detail").forEach((d) => (d.style.display = ""));
+        el.querySelectorAll(".agent-detail").forEach((d) => d.classList.remove("visible"));
+      }
+
+      async function loadDirectorLogs() {
+        const r = await api("/api/director/logs?limit=30");
+        const el = document.getElementById("director-logs");
+        if (!r.ok || !r.data.length) {
+          el.innerHTML =
+            '<div style="color:var(--hint);font-size:13px;padding:8px">No logs yet</div>';
+          return;
+        }
+        const colors = { info: "var(--hint)", warn: "#ff8c00", error: "#f44" };
+        el.innerHTML = r.data
+          .map(
+            (
+              l,
+            ) => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #222;color:${colors[l.level] || "var(--hint)"}">
+          <span style="opacity:0.6">${new Date(l.timestamp).toLocaleTimeString()}</span> ${esc(l.message)}${l.agentId ? ` <span style="opacity:0.5">[${l.agentId.slice(0, 8)}]</span>` : ""}
+        </div>`,
+          )
+          .join("");
+      }
+
+      async function loadMemory() {
+        const r = await api("/api/director/memory");
+        const el = document.getElementById("memory-list");
+        if (!r.ok || !Object.keys(r.data).length) {
+          el.innerHTML =
+            '<div style="color:var(--hint);font-size:13px;padding:8px">No memory entries</div>';
+          return;
+        }
+        el.innerHTML = Object.entries(r.data)
+          .map(
+            ([
+              k,
+              v,
+            ]) => `<div class="settings-group" style="display:flex;justify-content:space-between;align-items:center">
+          <div><div class="settings-label">${esc(k)}</div><div class="settings-value">${esc(v)}</div></div>
+          <button class="action-btn" onclick="deleteMemory('${esc(k)}')" style="font-size:11px;padding:4px 8px">🗑</button>
+        </div>`,
+          )
+          .join("");
+      }
+
+      function showDispatchForm() {
+        const form = document.getElementById("dispatch-form");
+        form.style.display = form.style.display === "none" ? "block" : "none";
+        // Populate items
+        const itemSel = document.getElementById("dispatch-item");
+        itemSel.innerHTML = allItems
+          .map((i) => `<option value="${i.id}">${esc(i.title.slice(0, 60))}</option>`)
+          .join("");
+        // Populate skills
+        const skillSel = document.getElementById("dispatch-skill");
+        skillSel.innerHTML = directorSkills
+          .map((s) => `<option value="${s.id}">${s.name} — ${s.description}</option>`)
+          .join("");
+      }
+
+      async function doDispatch() {
+        const workItemId = document.getElementById("dispatch-item").value;
+        const skill = document.getElementById("dispatch-skill").value;
+        if (!workItemId || !skill) return;
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+        await api("/api/director/dispatch", {
+          method: "POST",
+          body: JSON.stringify({ workItemId, skill }),
+        });
+        document.getElementById("dispatch-form").style.display = "none";
+        loadDirector();
+      }
+
+      function showMemoryAdd() {
+        const f = document.getElementById("memory-add-form");
+        f.style.display = f.style.display === "none" ? "block" : "none";
+      }
+
+      async function doAddMemory() {
+        const key = document.getElementById("mem-key").value.trim();
+        const value = document.getElementById("mem-val").value.trim();
+        if (!key) return;
+        await api("/api/director/memory", { method: "POST", body: JSON.stringify({ key, value }) });
+        document.getElementById("mem-key").value = "";
+        document.getElementById("mem-val").value = "";
+        document.getElementById("memory-add-form").style.display = "none";
+        loadMemory();
+      }
+
+      async function deleteMemory(key) {
+        await api("/api/director/memory/" + encodeURIComponent(key), { method: "DELETE" });
+        loadMemory();
+      }
 
       // Init
       loadInbox();

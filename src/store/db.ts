@@ -73,6 +73,33 @@ function runMigrations(db: Database.Database): void {
       last_sync TEXT NOT NULL,
       cursor TEXT DEFAULT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS director_logs (
+      id TEXT PRIMARY KEY,
+      timestamp TEXT NOT NULL,
+      level TEXT NOT NULL,
+      message TEXT NOT NULL,
+      agent_id TEXT,
+      metadata TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS director_memory (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sub_agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      skill TEXT NOT NULL,
+      status TEXT NOT NULL,
+      task TEXT,
+      result TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      error TEXT
+    );
   `);
 }
 
