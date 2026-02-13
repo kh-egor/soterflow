@@ -10,7 +10,7 @@ import type { WorkItem } from "../channels/base.js";
 import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
 import { getAllSyncStates } from "../store/sync.js";
 import { getAll, search, updateStatus } from "../store/workitems.js";
-import { authMiddleware, type AuthedRequest } from "./auth.js";
+import { authMiddleware } from "./auth.js";
 
 export function createServer() {
   const app = express();

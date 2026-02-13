@@ -20,6 +20,6 @@ server.listen(port, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     console.log(`[soterflow] Received ${signal}, shutting down...`);
-    gracefulShutdown(server, wss).then(() => process.exit(0));
+    void gracefulShutdown(server, wss).then(() => process.exit(0));
   });
 }

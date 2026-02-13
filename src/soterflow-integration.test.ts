@@ -3,9 +3,7 @@
  * Integration tests for the SoterFlow pipeline: DB → channels → orchestrator → inbox → API.
  */
 
-import Database from "better-sqlite3";
 import fs from "fs";
-import http from "node:http";
 import path from "path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { WorkItem } from "./channels/base.js";
@@ -160,7 +158,7 @@ describe("SoterFlow Integration", () => {
     badChannel.shouldFail = true;
 
     // Should not throw — partial failure is handled
-    const { stats } = await syncAll([goodChannel, badChannel]);
+    const { stats: _stats } = await syncAll([goodChannel, badChannel]);
 
     // The good channel's item should still be stored
     const inbox = getInbox();
