@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { WorkItem } from "../channels/base.js";
 import { getInbox, syncAll, createChannels, getConfiguredChannels } from "../agent/orchestrator.js";
+import { env } from "../soterflow-env.js";
 import { getAllSyncStates } from "../store/sync.js";
 import { getAll, search, updateStatus } from "../store/workitems.js";
 import { authMiddleware } from "./auth.js";
@@ -57,12 +58,14 @@ export function createServer() {
   // --- Inbox ---
   app.get("/api/inbox", (req, res) => {
     try {
-      const { source, type, status, search: q } = req.query as Record<string, string>;
+      const { source, type, status, search: q, since } = req.query as Record<string, string>;
+      // Default to 7 days ago if no since param
+      const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       let items: WorkItem[];
       if (q) {
         items = search(q);
       } else {
-        items = getInbox({ source, type, status });
+        items = getInbox({ source, type, status, since: sinceDate });
       }
       res.json({ ok: true, data: items });
     } catch (e: unknown) {
@@ -146,6 +149,31 @@ export function createServer() {
       const states = getAllSyncStates();
       const configured = getConfiguredChannels();
       res.json({ ok: true, data: { syncStates: states, channels: configured } });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
+  // --- Orchestrator status ---
+  app.get("/api/orchestrator/status", (_req, res) => {
+    try {
+      const items = getAll();
+      const itemCounts: Record<string, number> = {};
+      for (const item of items) {
+        itemCounts[item.source] = (itemCounts[item.source] || 0) + 1;
+      }
+      const states = getAllSyncStates();
+      const lastSync = states.length > 0 ? states[0].lastSync.toISOString() : null;
+      res.json({
+        ok: true,
+        data: {
+          running: true,
+          lastSync,
+          itemCounts,
+          syncWindowDays: env.SOTERFLOW_SYNC_WINDOW_DAYS,
+        },
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ ok: false, error: msg });

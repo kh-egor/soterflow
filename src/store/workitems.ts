@@ -11,6 +11,7 @@ export interface WorkItemFilters {
   source?: string;
   type?: string;
   status?: string;
+  since?: string;
 }
 
 /**
@@ -85,6 +86,10 @@ export function getAll(filters?: WorkItemFilters): WorkItem[] {
   if (filters?.status) {
     conditions.push("status = ?");
     params.push(filters.status);
+  }
+  if (filters?.since) {
+    conditions.push("timestamp >= ?");
+    params.push(filters.since);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";

@@ -171,6 +171,7 @@ export function getInbox(filters?: {
   source?: string;
   type?: string;
   status?: string;
+  since?: string;
 }): WorkItem[] {
   const items = getAll(filters);
   return items

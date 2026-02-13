@@ -64,11 +64,14 @@ export class GitHubChannel extends BaseChannel {
     }
 
     const items: WorkItem[] = [];
+    const syncDays = parseInt(process.env.SOTERFLOW_SYNC_WINDOW_DAYS ?? "7", 10);
+    const sinceDate = new Date(Date.now() - syncDays * 24 * 60 * 60 * 1000).toISOString();
 
-    // 1. Notifications (paginated)
+    // 1. Notifications (paginated, filtered by since)
     const notifications = await this.withRetry(() =>
       this.octokit!.paginate(this.octokit!.activity.listNotificationsForAuthenticatedUser, {
         all: false,
+        since: sinceDate,
         per_page: 100,
       }),
     );
@@ -78,11 +81,12 @@ export class GitHubChannel extends BaseChannel {
 
     await this.checkRateLimit();
 
-    // 2. Assigned issues (paginated)
+    // 2. Assigned issues (paginated, filtered by since)
     const issues = await this.withRetry(() =>
       this.octokit!.paginate(this.octokit!.issues.list, {
         filter: "assigned",
         state: "open",
+        since: sinceDate,
         per_page: 100,
       }),
     );

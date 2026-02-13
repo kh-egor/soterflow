@@ -100,6 +100,7 @@ export class JiraChannel extends BaseChannel {
   async sync(): Promise<WorkItem[]> {
     const seen = new Set<string>();
     const items: WorkItem[] = [];
+    const days = parseInt(process.env.SOTERFLOW_SYNC_WINDOW_DAYS ?? "7", 10);
 
     const addIssues = (issues: JiraIssue[]) => {
       for (const issue of issues) {
@@ -112,13 +113,13 @@ export class JiraChannel extends BaseChannel {
     };
 
     // 1. Assigned issues
-    addIssues(await this.searchAll(buildJql("assigned")));
+    addIssues(await this.searchAll(buildJql("assigned", days)));
     // 2. Watched issues
-    addIssues(await this.searchAll(buildJql("watched")));
+    addIssues(await this.searchAll(buildJql("watched", days)));
     // 3. Mentioned (text search — current user's email in text)
-    addIssues(await this.searchAll(buildJql("mentioned")));
-    // 4. Recently updated (last 7 days)
-    addIssues(await this.searchAll(buildJql("recent")));
+    addIssues(await this.searchAll(buildJql("mentioned", days)));
+    // 4. Recently updated
+    addIssues(await this.searchAll(buildJql("recent", days)));
 
     return items;
   }
@@ -162,16 +163,17 @@ export class JiraChannel extends BaseChannel {
 // --- Exported helpers for testability ---
 
 /** Build JQL for different query types */
-export function buildJql(type: "assigned" | "watched" | "mentioned" | "recent"): string {
+export function buildJql(type: "assigned" | "watched" | "mentioned" | "recent", days = 7): string {
+  const timeFilter = `updated >= -${days}d`;
   switch (type) {
     case "assigned":
-      return "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+      return `assignee = currentUser() AND resolution = Unresolved AND ${timeFilter} ORDER BY updated DESC`;
     case "watched":
-      return "watcher = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+      return `watcher = currentUser() AND resolution = Unresolved AND ${timeFilter} ORDER BY updated DESC`;
     case "mentioned":
-      return 'text ~ "currentUser()" AND resolution = Unresolved ORDER BY updated DESC';
+      return `text ~ "currentUser()" AND resolution = Unresolved AND ${timeFilter} ORDER BY updated DESC`;
     case "recent":
-      return "updated >= -7d AND (assignee = currentUser() OR watcher = currentUser()) ORDER BY updated DESC";
+      return `${timeFilter} AND (assignee = currentUser() OR watcher = currentUser()) ORDER BY updated DESC`;
   }
 }
 

@@ -41,8 +41,6 @@
         font-size: 13px;
         margin-bottom: 16px;
       }
-
-      /* Tabs */
       .tabs {
         display: flex;
         gap: 8px;
@@ -65,8 +63,11 @@
         background: var(--btn);
         color: var(--btn-text);
       }
-
-      /* Cards */
+      .tab .count {
+        font-size: 11px;
+        opacity: 0.8;
+        margin-left: 4px;
+      }
       .card {
         background: var(--section-bg);
         border-radius: 12px;
@@ -107,8 +108,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-
-      /* Badges */
       .badge {
         padding: 2px 8px;
         border-radius: 10px;
@@ -131,7 +130,6 @@
         background: #333355;
         color: #999;
       }
-
       .source-icon {
         font-size: 16px;
       }
@@ -149,8 +147,6 @@
         padding: 60px;
         color: var(--hint);
       }
-
-      /* Sync bar */
       .sync-bar {
         display: flex;
         justify-content: space-between;
@@ -173,8 +169,6 @@
         font-size: 11px;
         color: var(--hint);
       }
-
-      /* Detail view */
       .detail {
         display: none;
       }
@@ -225,8 +219,6 @@
         cursor: pointer;
         margin-bottom: 12px;
       }
-
-      /* Settings */
       .settings-group {
         background: var(--section-bg);
         border-radius: 12px;
@@ -254,8 +246,6 @@
       .dot-red {
         background: #f44336;
       }
-
-      /* Nav */
       .nav {
         position: fixed;
         bottom: 0;
@@ -288,23 +278,83 @@
       .page.visible {
         display: block;
       }
+      .time-filter {
+        margin-bottom: 12px;
+      }
+      .time-filter select {
+        background: var(--secondary-bg);
+        color: var(--text);
+        border: 1px solid var(--hint);
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .tool-card {
+        background: var(--section-bg);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+      }
+      .tool-name {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .tool-desc {
+        font-size: 13px;
+        color: var(--hint);
+      }
+      .tool-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        background: var(--btn);
+        color: var(--btn-text);
+        margin-left: 8px;
+      }
+      .settings-select {
+        background: var(--secondary-bg);
+        color: var(--text);
+        border: 1px solid var(--hint);
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin-top: 4px;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <!-- INBOX PAGE -->
       <div id="page-inbox" class="page visible">
-        <h1>📥 SoterFlow</h1>
+        <h1 id="inbox-header">📥 SoterFlow</h1>
         <p class="subtitle">Your unified work inbox</p>
         <div class="sync-bar">
           <button class="sync-btn" id="sync-btn" onclick="doSync()">🔄 Sync</button>
           <span class="sync-status" id="sync-status"></span>
         </div>
+        <div class="time-filter">
+          <select id="time-filter" onchange="onTimeFilterChange()">
+            <option value="1">Last 24h</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="0">All time</option>
+          </select>
+        </div>
         <div class="tabs" id="source-tabs">
-          <div class="tab active" data-source="">All</div>
-          <div class="tab" data-source="github">🐙 GitHub</div>
-          <div class="tab" data-source="jira">🔷 Jira</div>
-          <div class="tab" data-source="slack">💬 Slack</div>
+          <div class="tab active" data-source="">
+            All <span class="count" id="count-all"></span>
+          </div>
+          <div class="tab" data-source="github">
+            🐙 GitHub <span class="count" id="count-github"></span>
+          </div>
+          <div class="tab" data-source="jira">
+            🔷 Jira <span class="count" id="count-jira"></span>
+          </div>
+          <div class="tab" data-source="slack">
+            💬 Slack <span class="count" id="count-slack"></span>
+          </div>
         </div>
         <div id="inbox-list"><div class="loading">Loading...</div></div>
       </div>
@@ -318,8 +368,15 @@
       <!-- SETTINGS PAGE -->
       <div id="page-settings" class="page">
         <h1>⚙️ Settings</h1>
-        <p class="subtitle">Channel configuration</p>
+        <p class="subtitle">Configuration & status</p>
         <div id="settings-list"><div class="loading">Loading...</div></div>
+      </div>
+
+      <!-- TOOLS PAGE -->
+      <div id="page-tools" class="page">
+        <h1>🔧 Tools</h1>
+        <p class="subtitle">Available skills & integrations</p>
+        <div id="tools-list"></div>
       </div>
     </div>
 
@@ -331,6 +388,7 @@
       <div class="nav-item" onclick="showPage('settings')">
         <span class="nav-icon">⚙️</span>Settings
       </div>
+      <div class="nav-item" onclick="showPage('tools')"><span class="nav-icon">🔧</span>Tools</div>
     </div>
 
     <script>
@@ -344,6 +402,7 @@
       let initData = tg?.initData || "";
       let currentSource = "";
       let allItems = [];
+      let currentTimeDays = 7;
 
       function headers() {
         const h = { "Content-Type": "application/json" };
@@ -368,6 +427,24 @@
         return Math.floor(s / 86400) + "d";
       }
 
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function updateCounts() {
+        const counts = { all: allItems.length, github: 0, jira: 0, slack: 0 };
+        allItems.forEach((i) => {
+          counts[i.source] = (counts[i.source] || 0) + 1;
+        });
+        document.getElementById("count-all").textContent = `(${counts.all})`;
+        document.getElementById("count-github").textContent = `(${counts.github})`;
+        document.getElementById("count-jira").textContent = `(${counts.jira})`;
+        document.getElementById("count-slack").textContent = `(${counts.slack})`;
+        document.getElementById("inbox-header").textContent = `📥 SoterFlow (${counts.all})`;
+      }
+
       function renderItems(items) {
         const el = document.getElementById("inbox-list");
         if (!items.length) {
@@ -378,28 +455,22 @@
         el.innerHTML = items
           .map(
             (i) => `
-    <div class="card" onclick="showDetail('${i.id}')">
-      <div class="card-header">
-        <span class="source-icon">${sourceIcon(i.source)}</span>
-        <span class="card-title">${esc(i.title)}</span>
-        <span class="badge badge-${i.priority}">${i.priority}</span>
-      </div>
-      <div class="card-meta">
-        <span>${i.source}</span>
-        <span>${i.type}</span>
-        <span>${timeAgo(i.timestamp)}</span>
-      </div>
-      <div class="card-body">${esc(i.body?.slice(0, 100) || "")}</div>
-    </div>
-  `,
+          <div class="card" onclick="showDetail('${i.id}')">
+            <div class="card-header">
+              <span class="source-icon">${sourceIcon(i.source)}</span>
+              <span class="card-title">${esc(i.title)}</span>
+              <span class="badge badge-${i.priority}">${i.priority}</span>
+            </div>
+            <div class="card-meta">
+              <span>${i.source}</span>
+              <span>${i.type}</span>
+              <span>${timeAgo(i.timestamp)}</span>
+            </div>
+            <div class="card-body">${esc(i.body?.slice(0, 100) || "")}</div>
+          </div>
+        `,
           )
           .join("");
-      }
-
-      function esc(s) {
-        const d = document.createElement("div");
-        d.textContent = s;
-        return d.innerHTML;
       }
 
       function filterItems() {
@@ -407,10 +478,23 @@
           ? allItems.filter((i) => i.source === currentSource)
           : allItems;
         renderItems(filtered);
+        updateCounts();
+      }
+
+      function onTimeFilterChange() {
+        currentTimeDays = parseInt(document.getElementById("time-filter").value, 10);
+        loadInbox();
       }
 
       async function loadInbox() {
-        const r = await api("/api/inbox");
+        let path = "/api/inbox";
+        if (currentTimeDays > 0) {
+          const since = new Date(Date.now() - currentTimeDays * 24 * 60 * 60 * 1000).toISOString();
+          path += "?since=" + encodeURIComponent(since);
+        } else {
+          path += "?since=" + encodeURIComponent(new Date("2000-01-01").toISOString());
+        }
+        const r = await api(path);
         if (r.ok) {
           allItems = r.data || [];
           filterItems();
@@ -442,22 +526,21 @@
         const item = allItems.find((i) => i.id === id);
         if (!item) return;
         if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
-
         const actions = getActions(item);
         document.getElementById("detail-content").innerHTML = `
-    <div class="card-meta" style="margin-bottom:8px">
-      <span class="source-icon">${sourceIcon(item.source)}</span>
-      <span class="badge badge-${item.priority}">${item.priority}</span>
-      <span>${item.source} · ${item.type} · ${timeAgo(item.timestamp)}</span>
-    </div>
-    <div class="detail-title">${esc(item.title)}</div>
-    <div class="detail-meta">By ${esc(item.author)}</div>
-    <div class="detail-body">${esc(item.body || "No content")}</div>
-    ${item.url ? '<a href="' + esc(item.url) + '" target="_blank" style="color:var(--link);font-size:13px;display:block;margin-bottom:16px">Open in ' + item.source + " →</a>" : ""}
-    <div class="detail-actions">
-      ${actions.map((a) => `<button class="action-btn${a.primary ? " primary" : ""}" onclick="doAction('${item.id}','${a.action}')">${a.label}</button>`).join("")}
-    </div>
-  `;
+          <div class="card-meta" style="margin-bottom:8px">
+            <span class="source-icon">${sourceIcon(item.source)}</span>
+            <span class="badge badge-${item.priority}">${item.priority}</span>
+            <span>${item.source} · ${item.type} · ${timeAgo(item.timestamp)}</span>
+          </div>
+          <div class="detail-title">${esc(item.title)}</div>
+          <div class="detail-meta">By ${esc(item.author)}</div>
+          <div class="detail-body">${esc(item.body || "No content")}</div>
+          ${item.url ? '<a href="' + esc(item.url) + '" target="_blank" style="color:var(--link);font-size:13px;display:block;margin-bottom:16px">Open in ' + item.source + " →</a>" : ""}
+          <div class="detail-actions">
+            ${actions.map((a) => `<button class="action-btn${a.primary ? " primary" : ""}" onclick="doAction('${item.id}','${a.action}')">${a.label}</button>`).join("")}
+          </div>
+        `;
         showPage("detail");
         if (tg?.BackButton) {
           tg.BackButton.show();
@@ -492,33 +575,116 @@
       }
 
       async function loadSettings() {
-        const r = await api("/api/sync/status");
         const el = document.getElementById("settings-list");
-        if (!r.ok) {
-          el.innerHTML = '<div class="empty">⚠️ ' + esc(r.error || "Error") + "</div>";
-          return;
+        try {
+          const [syncRes, statusRes] = await Promise.all([
+            api("/api/sync/status"),
+            api("/api/orchestrator/status"),
+          ]);
+
+          let html = "";
+
+          // Orchestrator status section
+          if (statusRes.ok) {
+            const st = statusRes.data;
+            const lastSync = st.lastSync ? new Date(st.lastSync).toLocaleString() : "Never";
+            const totalItems = Object.values(st.itemCounts || {}).reduce((a, b) => a + b, 0);
+            html += `
+              <div class="settings-group">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span>🤖 <strong>Orchestrator</strong></span>
+                  <span class="dot ${st.running ? "dot-green" : "dot-red"}"></span>
+                </div>
+                <div class="settings-label" style="margin-top:6px">Status: ${st.running ? "Running" : "Stopped"}</div>
+                <div class="settings-label">Last sync: ${lastSync}</div>
+                <div class="settings-label">Total items: ${totalItems}</div>
+                <div class="settings-label" style="margin-top:8px">Sync window:
+                  <select class="settings-select" id="sync-window-select" onchange="onSyncWindowChange()">
+                    ${[1, 3, 7, 14, 30].map((d) => `<option value="${d}" ${d === st.syncWindowDays ? "selected" : ""}>${d} days</option>`).join("")}
+                  </select>
+                </div>
+              </div>
+            `;
+
+            // Per-source counts
+            if (st.itemCounts && Object.keys(st.itemCounts).length) {
+              html +=
+                '<div class="settings-group"><div style="margin-bottom:6px"><strong>📊 Items per channel</strong></div>';
+              for (const [source, count] of Object.entries(st.itemCounts)) {
+                html += `<div class="settings-label">${sourceIcon(source)} ${source}: <strong style="color:var(--text)">${count}</strong></div>`;
+              }
+              html += "</div>";
+            }
+          }
+
+          // Channel configs
+          if (syncRes.ok) {
+            const channels = syncRes.data?.channels || [];
+            const states = syncRes.data?.syncStates || [];
+            for (const ch of channels) {
+              const state = states.find((s) => s.channelName === ch.name);
+              const lastSync = state ? new Date(state.lastSync).toLocaleString() : "Never";
+              html += `
+                <div class="settings-group">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span>${sourceIcon(ch.name)} <strong>${ch.name}</strong></span>
+                    <span class="dot ${ch.configured ? "dot-green" : "dot-red"}"></span>
+                  </div>
+                  <div class="settings-label" style="margin-top:6px">Status: ${ch.configured ? "Connected" : "Not configured"}</div>
+                  <div class="settings-label">Last sync: ${lastSync}</div>
+                </div>
+              `;
+            }
+          }
+
+          el.innerHTML = html || '<div class="empty">No data available</div>';
+        } catch (e) {
+          el.innerHTML = '<div class="empty">⚠️ Failed to load settings</div>';
         }
+      }
 
-        const channels = r.data?.channels || [];
-        const states = r.data?.syncStates || [];
+      function onSyncWindowChange() {
+        const days = document.getElementById("sync-window-select").value;
+        // This would need a config API endpoint to persist — show info for now
+        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning");
+        alert(
+          "Set SOTERFLOW_SYNC_WINDOW_DAYS=" + days + " in your environment and restart the API.",
+        );
+      }
 
-        el.innerHTML =
-          channels
-            .map((ch) => {
-              const state = states.find((s) => s.channel_name === ch.name);
-              const lastSync = state ? new Date(state.last_sync).toLocaleString() : "Never";
-              return `
-      <div class="settings-group">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span>${sourceIcon(ch.name)} <strong>${ch.name}</strong></span>
-          <span class="dot ${ch.configured ? "dot-green" : "dot-red"}"></span>
-        </div>
-        <div class="settings-label" style="margin-top:6px">Status: ${ch.configured ? "Connected" : "Not configured"}</div>
-        <div class="settings-label">Last sync: ${lastSync}</div>
-      </div>
-    `;
-            })
-            .join("") || '<div class="empty">No channels configured</div>';
+      function loadTools() {
+        const tools = [
+          {
+            name: "github-pr",
+            desc: "Review, approve, and merge GitHub pull requests",
+            status: "active",
+          },
+          {
+            name: "jira-update",
+            desc: "Transition, comment, and assign Jira issues",
+            status: "active",
+          },
+          {
+            name: "slack-reply",
+            desc: "Reply to Slack messages and threads",
+            status: "coming soon",
+          },
+          {
+            name: "deploy",
+            desc: "Trigger deployments via GitHub Actions or Vercel",
+            status: "coming soon",
+          },
+        ];
+        document.getElementById("tools-list").innerHTML = tools
+          .map(
+            (t) => `
+          <div class="tool-card">
+            <div class="tool-name">${t.name} <span class="tool-badge">${t.status}</span></div>
+            <div class="tool-desc">${t.desc}</div>
+          </div>
+        `,
+          )
+          .join("");
       }
 
       function showPage(name) {
@@ -527,13 +693,14 @@
         document.querySelectorAll(".nav-item").forEach((n, i) => {
           n.classList.toggle(
             "active",
-            (name === "inbox" && i === 0) || (name === "settings" && i === 1),
+            (name === "inbox" && i === 0) ||
+              (name === "settings" && i === 1) ||
+              (name === "tools" && i === 2),
           );
         });
         if (name === "settings") loadSettings();
-        if (name === "inbox") {
-          if (tg?.BackButton) tg.BackButton.hide();
-        }
+        if (name === "tools") loadTools();
+        if (name === "inbox" && tg?.BackButton) tg.BackButton.hide();
       }
 
       // Tab clicks
