@@ -198,6 +198,74 @@ export function createServer() {
     }
   });
 
+  // --- Prompt (send item + free text to Telegram bot chat) ---
+  app.post("/api/inbox/:id/prompt", async (req, res) => {
+    try {
+      const { text } = req.body ?? {};
+      if (!text?.trim()) {
+        res.status(400).json({ ok: false, error: "text required" });
+        return;
+      }
+
+      const all = getAll();
+      const item = all.find((i) => i.id === req.params.id);
+      if (!item) {
+        res.status(404).json({ ok: false, error: "Not found" });
+        return;
+      }
+
+      const botToken = env.TELEGRAM_BOT_TOKEN;
+      const chatId = env.SOTERFLOW_OWNER_CHAT_ID;
+      if (!botToken || !chatId) {
+        res
+          .status(500)
+          .json({ ok: false, error: "TELEGRAM_BOT_TOKEN and SOTERFLOW_OWNER_CHAT_ID must be set" });
+        return;
+      }
+
+      // Format context message
+      const meta = item.metadata as Record<string, unknown>;
+      const contextParts = [
+        `📋 *SoterFlow Prompt*`,
+        ``,
+        `*Item:* ${item.title}`,
+        `*Source:* ${item.source} · ${item.type}`,
+        meta.status ? `*Status:* ${meta.status}` : "",
+        meta.repo ? `*Repo:* ${meta.repo}` : "",
+        meta.from ? `*From:* ${meta.from}` : "",
+        item.author !== "unknown" ? `*Author:* ${item.author}` : "",
+        item.url ? `*URL:* ${item.url}` : "",
+        item.body ? `\n---\n${item.body.slice(0, 500)}` : "",
+        `\n---\n💬 *Prompt:* ${text.trim()}`,
+      ].filter(Boolean);
+
+      const message = contextParts.join("\n");
+
+      // Send via Telegram Bot API
+      const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+        }),
+      });
+      const tgData = (await tgRes.json()) as { ok: boolean; description?: string };
+
+      if (!tgData.ok) {
+        res.status(500).json({ ok: false, error: `Telegram API: ${tgData.description}` });
+        return;
+      }
+
+      res.json({ ok: true, data: { sent: true } });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
   // --- Sync ---
   app.post("/api/sync", async (_req, res) => {
     try {

@@ -15,4 +15,5 @@ export const env = {
   GMAIL_APP_PASSWORD: process.env.GMAIL_APP_PASSWORD ?? "",
   GMAIL_IMAP_HOST: process.env.GMAIL_IMAP_HOST ?? "imap.gmail.com",
   GMAIL_IMAP_PORT: parseInt(process.env.GMAIL_IMAP_PORT ?? "993", 10),
+  SOTERFLOW_OWNER_CHAT_ID: process.env.SOTERFLOW_OWNER_CHAT_ID ?? "",
 };

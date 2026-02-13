@@ -653,6 +653,19 @@
           <div class="detail-actions">
             ${actions.map((a) => `<button class="action-btn${a.primary ? " primary" : ""}" onclick="doAction('${item.id}','${a.action}')">${a.label}</button>`).join("")}
           </div>
+
+          <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.1);padding-top:14px">
+            <div style="font-size:13px;color:var(--hint);margin-bottom:6px">💬 Ask about this item</div>
+            <div style="display:flex;gap:8px">
+              <input id="prompt-input" type="text" placeholder="e.g. summarize, draft reply, check status..."
+                style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--hint);background:var(--secondary-bg);color:var(--text);font-size:14px"
+                onkeydown="if(event.key==='Enter')sendPrompt('${item.id}')" />
+              <button class="action-btn primary" onclick="sendPrompt('${item.id}')" style="padding:10px 14px;white-space:nowrap">
+                Send ↗
+              </button>
+            </div>
+            <div id="prompt-status" style="font-size:12px;color:var(--hint);margin-top:6px;display:none"></div>
+          </div>
         `;
         showPage("detail");
         if (tg?.BackButton) {
@@ -690,6 +703,45 @@
         });
         await loadInbox();
         showPage("inbox");
+      }
+
+      // --- Prompt ---
+
+      async function sendPrompt(itemId) {
+        const input = document.getElementById("prompt-input");
+        const status = document.getElementById("prompt-status");
+        const text = input.value.trim();
+        if (!text) return;
+
+        input.disabled = true;
+        status.style.display = "block";
+        status.textContent = "⏳ Sending to Telegram...";
+        status.style.color = "var(--hint)";
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+
+        try {
+          const r = await api("/api/inbox/" + itemId + "/prompt", {
+            method: "POST",
+            body: JSON.stringify({ text }),
+          });
+          if (r.ok) {
+            status.textContent = "✅ Sent! Check Telegram for response.";
+            status.style.color = "#4caf50";
+            input.value = "";
+            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+            // Close mini app after short delay so user sees the bot response
+            setTimeout(() => {
+              if (tg?.close) tg.close();
+            }, 1500);
+          } else {
+            status.textContent = "❌ " + (r.error || "Failed to send");
+            status.style.color = "#f44";
+          }
+        } catch (e) {
+          status.textContent = "❌ Network error";
+          status.style.color = "#f44";
+        }
+        input.disabled = false;
       }
 
       // --- Dashboard ---
