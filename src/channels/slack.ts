@@ -1,54 +1,126 @@
 /**
  * @module channels/slack
- * Slack channel connector — fetches DMs, mentions, and starred messages.
- * Features: cursor-based pagination, rate limit handling with Retry-After, exponential backoff.
+ * Slack channel connector using Socket Mode for real-time events.
+ * Uses User Token (xoxp-) to act on behalf of the user, not as a bot.
+ * Features: Socket Mode for events, cursor-based pagination, rate limit handling.
  */
 
+import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { BaseChannel, WorkItem } from "./base";
-import { withRetry, sleep } from "./retry";
+import { withRetry } from "./retry";
 
 export class SlackChannel extends BaseChannel {
   name = "slack";
   private client: WebClient | null = null;
+  private socketClient: SocketModeClient | null = null;
   private userId = "";
+  private eventListeners: Array<(item: WorkItem) => void> = [];
 
   async connect(): Promise<void> {
     const token = process.env.SLACK_TOKEN;
+    const appToken = process.env.SLACK_APP_TOKEN;
     if (!token) {
       throw new Error("SLACK_TOKEN is not set");
     }
     this.client = new WebClient(token);
     const auth = await this.slackRetry(() => this.client!.auth.test());
     this.userId = auth.user_id as string;
+
+    // Start Socket Mode for real-time events (requires xapp- app-level token)
+    if (appToken) {
+      this.socketClient = new SocketModeClient({ appToken });
+      this.setupSocketListeners();
+      await this.socketClient.start();
+      console.log("[soterflow] Slack Socket Mode connected");
+    }
   }
 
   async disconnect(): Promise<void> {
+    if (this.socketClient) {
+      await this.socketClient.disconnect();
+      this.socketClient = null;
+    }
     this.client = null;
     this.userId = "";
+    this.eventListeners = [];
+  }
+
+  /** Register a callback for real-time incoming work items */
+  onNewItem(listener: (item: WorkItem) => void): void {
+    this.eventListeners.push(listener);
+  }
+
+  private setupSocketListeners(): void {
+    if (!this.socketClient) {
+      return;
+    }
+
+    // Listen for messages
+    this.socketClient.on("message", async ({ event, ack }) => {
+      await ack();
+      if (event.user === this.userId) {
+        return;
+      } // ignore own messages
+
+      const item = mapSlackEvent(event, "message");
+      this.eventListeners.forEach((fn) => fn(item));
+    });
+
+    // Listen for mentions (app_mention or messages containing @user)
+    this.socketClient.on("app_mention", async ({ event, ack }) => {
+      await ack();
+      const item = mapSlackEvent(event, "mention");
+      this.eventListeners.forEach((fn) => fn(item));
+    });
+
+    // Listen for reactions
+    this.socketClient.on("reaction_added", async ({ event, ack }) => {
+      await ack();
+      if (event.user === this.userId) {
+        return;
+      }
+      const item: WorkItem = {
+        id: `slack-reaction-${event.item?.channel}-${event.item?.ts}-${event.reaction}`,
+        source: "slack",
+        type: "notification",
+        title: `${event.user} reacted with :${event.reaction}:`,
+        body: "",
+        author: event.user ?? "unknown",
+        timestamp: new Date(parseFloat(event.event_ts ?? "0") * 1000),
+        priority: "low",
+        url: event.item?.channel
+          ? `https://slack.com/archives/${event.item.channel}/p${(event.item.ts ?? "").replace(".", "")}`
+          : "",
+        metadata: { channel: event.item?.channel, ts: event.item?.ts, reaction: event.reaction },
+        status: "new",
+      };
+      this.eventListeners.forEach((fn) => fn(item));
+    });
   }
 
   /** Retry wrapper handling Slack rate limits (429 + Retry-After) */
   private slackRetry<T>(fn: () => Promise<T>): Promise<T> {
     return withRetry(fn, {
-      isRetryable: (err: any) => {
-        const code = err?.code;
-        const status = err?.status ?? err?.statusCode;
-        // Slack WebClient throws with code: 'slack_webapi_rate_limited'
+      isRetryable: (err: unknown) => {
+        const e = err as Record<string, unknown>;
+        const code = e?.code;
+        const status = (e?.status ?? e?.statusCode) as number | undefined;
         if (code === "slack_webapi_rate_limited") {
           return true;
         }
         if (status === 429) {
           return true;
         }
-        if (status >= 500) {
+        if (status && status >= 500) {
           return true;
         }
         return false;
       },
-      getWaitMs: (attempt: number, err: any) => {
-        // Slack provides retryAfter in seconds on rate limit errors
-        const retryAfter = err?.retryAfter ?? err?.headers?.["retry-after"];
+      getWaitMs: (attempt: number, err: unknown) => {
+        const e = err as Record<string, unknown>;
+        const retryAfter = (e?.retryAfter ??
+          (e?.headers as Record<string, string>)?.["retry-after"]) as string | number | undefined;
         if (retryAfter) {
           return Math.min(Number(retryAfter) * 1000 + 500, 120_000);
         }
@@ -108,13 +180,20 @@ export class SlackChannel extends BaseChannel {
         }
         items.push(mapSlackStar(star));
       }
-      starCursor = (stars as any).response_metadata?.next_cursor || undefined;
+      starCursor = (stars as Record<string, unknown>).response_metadata
+        ? ((stars as Record<string, unknown>).response_metadata as Record<string, string>)
+            ?.next_cursor || undefined
+        : undefined;
     } while (starCursor);
 
     return items;
   }
 
-  async performAction(itemId: string, action: string, params?: Record<string, any>): Promise<void> {
+  async performAction(
+    itemId: string,
+    action: string,
+    params?: Record<string, unknown>,
+  ): Promise<void> {
     if (!this.client) {
       throw new Error("Not connected");
     }
@@ -149,54 +228,80 @@ export class SlackChannel extends BaseChannel {
 
 // --- Exported mappers for testability ---
 
-/** Map a Slack DM message to WorkItem */
-export function mapSlackDM(msg: any, channelId: string): WorkItem {
+/** Map a real-time Slack event to WorkItem */
+export function mapSlackEvent(
+  event: Record<string, unknown>,
+  type: "message" | "mention",
+): WorkItem {
+  const channel = event.channel as string;
+  const ts = event.ts as string;
   return {
-    id: `slack-dm-${channelId}-${msg.ts}`,
+    id: `slack-${type}-${channel}-${ts}`,
+    source: "slack",
+    type: type === "mention" ? "mention" : "message",
+    title: type === "mention" ? `Mention in ${channel}` : `Message in ${channel}`,
+    body: (event.text as string) ?? "",
+    author: (event.user as string) ?? "unknown",
+    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
+    priority: type === "mention" ? "high" : "normal",
+    url: `https://slack.com/archives/${channel}/p${(ts ?? "").replace(".", "")}`,
+    metadata: { channel, ts },
+    status: "new",
+  };
+}
+
+/** Map a Slack DM message to WorkItem */
+export function mapSlackDM(msg: Record<string, unknown>, channelId: string): WorkItem {
+  const ts = msg.ts as string;
+  return {
+    id: `slack-dm-${channelId}-${ts}`,
     source: "slack",
     type: "message",
-    title: `DM from ${msg.user ?? "unknown"}`,
-    body: msg.text ?? "",
-    author: msg.user ?? "unknown",
-    timestamp: new Date(parseFloat(msg.ts ?? "0") * 1000),
+    title: `DM from ${(msg.user as string) ?? "unknown"}`,
+    body: (msg.text as string) ?? "",
+    author: (msg.user as string) ?? "unknown",
+    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
     priority: "normal",
-    url: `https://slack.com/archives/${channelId}/p${(msg.ts ?? "").replace(".", "")}`,
-    metadata: { channel: channelId, ts: msg.ts, isDM: true },
+    url: `https://slack.com/archives/${channelId}/p${(ts ?? "").replace(".", "")}`,
+    metadata: { channel: channelId, ts, isDM: true },
     status: "new",
   };
 }
 
 /** Map a Slack mention search result to WorkItem */
-export function mapSlackMention(match: any): WorkItem {
+export function mapSlackMention(match: Record<string, unknown>): WorkItem {
+  const channel = match.channel as Record<string, unknown> | undefined;
+  const ts = match.ts as string;
   return {
-    id: `slack-mention-${match.channel?.id}-${match.ts}`,
+    id: `slack-mention-${channel?.id}-${ts}`,
     source: "slack",
     type: "mention",
-    title: `Mention in #${match.channel?.name ?? "unknown"}`,
-    body: match.text ?? "",
-    author: match.user ?? match.username ?? "unknown",
-    timestamp: new Date(parseFloat(match.ts ?? "0") * 1000),
+    title: `Mention in #${(channel?.name as string) ?? "unknown"}`,
+    body: (match.text as string) ?? "",
+    author: (match.user as string) ?? (match.username as string) ?? "unknown",
+    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
     priority: "high",
-    url: match.permalink ?? "",
-    metadata: { channel: match.channel?.id, ts: match.ts },
+    url: (match.permalink as string) ?? "",
+    metadata: { channel: channel?.id, ts },
     status: "new",
   };
 }
 
 /** Map a Slack starred message to WorkItem */
-export function mapSlackStar(star: any): WorkItem {
-  const msg = star.message;
+export function mapSlackStar(star: Record<string, unknown>): WorkItem {
+  const msg = star.message as Record<string, unknown> | undefined;
+  const ts = msg?.ts as string;
   return {
-    id: `slack-star-${star.channel}-${msg?.ts}`,
+    id: `slack-star-${star.channel}-${ts}`,
     source: "slack",
     type: "message",
     title: `Starred message in ${star.channel}`,
-    body: msg?.text ?? "",
-    author: msg?.user ?? "unknown",
-    timestamp: new Date(parseFloat(msg?.ts ?? "0") * 1000),
+    body: (msg?.text as string) ?? "",
+    author: (msg?.user as string) ?? "unknown",
+    timestamp: new Date(parseFloat(ts ?? "0") * 1000),
     priority: "normal",
-    url: msg?.permalink ?? "",
-    metadata: { channel: star.channel, ts: msg?.ts, starred: true },
+    url: (msg?.permalink as string) ?? "",
+    metadata: { channel: star.channel, ts, starred: true },
     status: "new",
   };
 }
