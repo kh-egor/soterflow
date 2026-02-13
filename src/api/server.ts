@@ -224,15 +224,16 @@ export function createServer() {
       }
 
       // Format context message
-      const meta = item.metadata as Record<string, unknown>;
+      const meta = item.metadata;
+      const ms = (k: string): string => (meta[k] as string) ?? "";
       const contextParts = [
         `📋 *SoterFlow Prompt*`,
         ``,
         `*Item:* ${item.title}`,
         `*Source:* ${item.source} · ${item.type}`,
-        meta.status ? `*Status:* ${String(meta.status)}` : "",
-        meta.repo ? `*Repo:* ${String(meta.repo)}` : "",
-        meta.from ? `*From:* ${String(meta.from)}` : "",
+        ms("status") ? `*Status:* ${ms("status")}` : "",
+        ms("repo") ? `*Repo:* ${ms("repo")}` : "",
+        ms("from") ? `*From:* ${ms("from")}` : "",
         item.author !== "unknown" ? `*Author:* ${item.author}` : "",
         item.url ? `*URL:* ${item.url}` : "",
         item.body ? `\n---\n${item.body.slice(0, 500)}` : "",
