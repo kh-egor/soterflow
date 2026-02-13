@@ -518,8 +518,10 @@
       }
 
       function updateCounts() {
-        const counts = { all: allItems.length, github: 0, jira: 0, slack: 0, gmail: 0 };
-        allItems.forEach((i) => {
+        const hideStatuses = ["seen", "done", "dismissed"];
+        const visible = allItems.filter((i) => !hideStatuses.includes(i.status));
+        const counts = { all: visible.length, github: 0, jira: 0, slack: 0, gmail: 0 };
+        visible.forEach((i) => {
           counts[i.source] = (counts[i.source] || 0) + 1;
         });
         document.getElementById("count-all").textContent = `(${counts.all})`;
@@ -559,10 +561,13 @@
       }
 
       function filterItems() {
-        const filtered = currentSource
-          ? allItems.filter((i) => i.source === currentSource)
-          : allItems;
-        renderItems(filtered);
+        // Hide seen/done/dismissed items unless showAll is toggled
+        const hideStatuses = ["seen", "done", "dismissed"];
+        let items = allItems.filter((i) => !hideStatuses.includes(i.status));
+        if (currentSource) {
+          items = items.filter((i) => i.source === currentSource);
+        }
+        renderItems(items);
         updateCounts();
       }
 
