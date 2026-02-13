@@ -675,8 +675,9 @@
           a.unshift({ label: "🔀 Merge", action: "merge" });
         }
         if (item.source === "gmail") {
-          a.splice(1, 0, { label: "📂 Archive", action: "archive" });
-          a.splice(2, 0, { label: "⭐ Star", action: "star" });
+          a.splice(1, 0, { label: "📖 Mark Read", action: "read" });
+          a.splice(2, 0, { label: "📂 Archive", action: "archive" });
+          a.splice(3, 0, { label: "⭐ Star", action: "star" });
         }
         return a;
       }

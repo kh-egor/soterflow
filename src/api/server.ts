@@ -178,7 +178,20 @@ export function createServer() {
       await channel.performAction(item.id, action, params);
       // Don't disconnect cached channels — they're reused across syncs
 
-      res.json({ ok: true, data: { id: item.id, action } });
+      // Map source-specific actions to local status updates
+      const statusMap: Record<string, WorkItem["status"]> = {
+        read: "seen",
+        archive: "done",
+        close: "done",
+        merge: "done",
+        approve: "seen",
+      };
+      const newStatus = statusMap[action];
+      if (newStatus) {
+        updateStatus(item.id, newStatus);
+      }
+
+      res.json({ ok: true, data: { id: item.id, action, status: newStatus || item.status } });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ ok: false, error: msg });
