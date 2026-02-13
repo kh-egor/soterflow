@@ -154,12 +154,21 @@ export class JiraChannel extends BaseChannel {
     const key = (params?.key as string) ?? itemId.replace("jira-", "");
 
     switch (action) {
-      case "transition":
+      case "transition": {
         await this.request(`/rest/api/3/issue/${key}/transitions`, {
           method: "POST",
           body: JSON.stringify({ transition: { id: params?.transitionId } }),
         });
+        // Auto-assign to owner on transition
+        const ownerAccountId = (params?.assignTo as string) || process.env.JIRA_OWNER_ACCOUNT_ID;
+        if (ownerAccountId) {
+          await this.request(`/rest/api/3/issue/${key}/assignee`, {
+            method: "PUT",
+            body: JSON.stringify({ accountId: ownerAccountId }),
+          });
+        }
         break;
+      }
       case "comment":
         await this.request(`/rest/api/3/issue/${key}/comment`, {
           method: "POST",
