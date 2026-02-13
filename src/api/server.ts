@@ -66,6 +66,7 @@ export function createServer() {
         search: q,
         since,
         excludeStatuses,
+        excludeReasons,
       } = req.query as Record<string, string>;
       // Default to 7 days ago if no since param
       const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -79,11 +80,26 @@ export function createServer() {
       if (excludeStatuses) {
         const excluded = new Set(excludeStatuses.split(",").map((s) => s.trim().toLowerCase()));
         items = items.filter((i) => {
-          if (i.source !== "jira") return true;
+          if (i.source !== "jira") {
+            return true;
+          }
           const jiraStatus = (
             ((i.metadata as Record<string, unknown>)?.status as string) || ""
           ).toLowerCase();
           return !excluded.has(jiraStatus);
+        });
+      }
+      // Filter out excluded GitHub reasons
+      if (excludeReasons) {
+        const excl = new Set(excludeReasons.split(",").map((s) => s.trim().toLowerCase()));
+        items = items.filter((i) => {
+          if (i.source !== "github") {
+            return true;
+          }
+          const reason = (
+            ((i.metadata as Record<string, unknown>)?.reason as string) || ""
+          ).toLowerCase();
+          return !excl.has(reason);
         });
       }
       res.json({ ok: true, data: items });

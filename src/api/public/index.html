@@ -576,9 +576,21 @@
           path += "?since=" + encodeURIComponent(new Date("2000-01-01").toISOString());
         }
         // Apply Jira status filter
+        // Default: exclude Closed and Resolved on first use
+        if (localStorage.getItem("sf_jira_excluded") === null) {
+          localStorage.setItem("sf_jira_excluded", "Closed,Resolved");
+        }
         const excluded = localStorage.getItem("sf_jira_excluded") || "";
         if (excluded) {
           path += "&excludeStatuses=" + encodeURIComponent(excluded);
+        }
+        // Default: exclude ci_activity GitHub notifications
+        if (localStorage.getItem("sf_gh_excluded_reasons") === null) {
+          localStorage.setItem("sf_gh_excluded_reasons", "ci_activity");
+        }
+        const ghExcluded = localStorage.getItem("sf_gh_excluded_reasons") || "";
+        if (ghExcluded) {
+          path += "&excludeReasons=" + encodeURIComponent(ghExcluded);
         }
         const r = await api(path);
         if (r.ok) {
