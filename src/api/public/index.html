@@ -575,6 +575,11 @@
         } else {
           path += "?since=" + encodeURIComponent(new Date("2000-01-01").toISOString());
         }
+        // Apply Jira status filter
+        const excluded = localStorage.getItem("sf_jira_excluded") || "";
+        if (excluded) {
+          path += "&excludeStatuses=" + encodeURIComponent(excluded);
+        }
         const r = await api(path);
         if (r.ok) {
           allItems = r.data || [];
@@ -747,10 +752,44 @@
             }
           }
 
+          // Jira status filter section
+          try {
+            const statusRes2 = await api("/api/jira/statuses");
+            if (statusRes2.ok && statusRes2.data?.length) {
+              const saved = localStorage.getItem("sf_jira_excluded") || "";
+              const excluded = saved ? saved.split(",") : [];
+              html +=
+                '<div class="settings-group"><div style="margin-bottom:8px"><strong>🔷 Jira Status Filter</strong></div>';
+              html +=
+                '<div class="settings-label" style="margin-bottom:6px">Toggle which statuses to show in inbox:</div>';
+              for (const st of statusRes2.data) {
+                const isExcluded = excluded.includes(st);
+                const checked = isExcluded ? "" : "checked";
+                html += `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px;color:var(--text)">
+                  <input type="checkbox" ${checked} onchange="toggleJiraStatus('${st.replace(/'/g, "\\'")}', this.checked)" style="width:18px;height:18px;accent-color:var(--accent)">
+                  <span>${esc(st)}</span>
+                </label>`;
+              }
+              html += "</div>";
+            }
+          } catch {}
+
           el.innerHTML = html || '<div class="empty">No data available</div>';
         } catch (e) {
           el.innerHTML = '<div class="empty">⚠️ Failed to load settings</div>';
         }
+      }
+
+      function toggleJiraStatus(status, enabled) {
+        const saved = localStorage.getItem("sf_jira_excluded") || "";
+        let excluded = saved ? saved.split(",") : [];
+        if (enabled) {
+          excluded = excluded.filter((s) => s !== status);
+        } else {
+          if (!excluded.includes(status)) excluded.push(status);
+        }
+        localStorage.setItem("sf_jira_excluded", excluded.join(","));
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
       }
 
       function onSyncWindowChange() {

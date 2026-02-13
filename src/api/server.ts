@@ -59,7 +59,14 @@ export function createServer() {
   // --- Inbox ---
   app.get("/api/inbox", (req, res) => {
     try {
-      const { source, type, status, search: q, since } = req.query as Record<string, string>;
+      const {
+        source,
+        type,
+        status,
+        search: q,
+        since,
+        excludeStatuses,
+      } = req.query as Record<string, string>;
       // Default to 7 days ago if no since param
       const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       let items: WorkItem[];
@@ -67,6 +74,17 @@ export function createServer() {
         items = search(q);
       } else {
         items = getInbox({ source, type, status, since: sinceDate });
+      }
+      // Filter out excluded Jira statuses
+      if (excludeStatuses) {
+        const excluded = new Set(excludeStatuses.split(",").map((s) => s.trim().toLowerCase()));
+        items = items.filter((i) => {
+          if (i.source !== "jira") return true;
+          const jiraStatus = (
+            ((i.metadata as Record<string, unknown>)?.status as string) || ""
+          ).toLowerCase();
+          return !excluded.has(jiraStatus);
+        });
       }
       res.json({ ok: true, data: items });
     } catch (e: unknown) {
@@ -84,6 +102,22 @@ export function createServer() {
         return;
       }
       res.json({ ok: true, data: item });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ ok: false, error: msg });
+    }
+  });
+
+  // Get unique Jira statuses from current items
+  app.get("/api/jira/statuses", (_req, res) => {
+    try {
+      const all = getAll({ source: "jira" });
+      const statuses = [
+        ...new Set(
+          all.map((i) => (i.metadata as Record<string, unknown>)?.status as string).filter(Boolean),
+        ),
+      ].toSorted();
+      res.json({ ok: true, data: statuses });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ ok: false, error: msg });
