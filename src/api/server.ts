@@ -36,9 +36,14 @@ export function createServer() {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   app.use(express.static(path.join(__dirname, "public")));
 
-  // Auth only for /api/* routes (except health)
+  // Auth for /api/* routes — skip for health and local requests
   app.use("/api", (req, res, next) => {
     if (req.path === "/health") {
+      return next();
+    }
+    // Allow local requests without auth (localhost / 127.0.0.1)
+    const ip = req.ip ?? req.socket.remoteAddress ?? "";
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1") {
       return next();
     }
     return (authMiddleware as express.RequestHandler)(req, res, next);

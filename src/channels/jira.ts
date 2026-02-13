@@ -74,19 +74,25 @@ export class JiraChannel extends BaseChannel {
     });
   }
 
-  /** Paginated JQL search returning all matching issues. */
+  /** Paginated JQL search returning all matching issues (uses v3 search/jql endpoint). */
   private async searchAll(jql: string): Promise<JiraIssue[]> {
     const issues: JiraIssue[] = [];
-    let startAt = 0;
+    let nextPageToken: string | undefined;
     while (true) {
-      const data = await this.request(
-        `/rest/api/3/search?jql=${encodeURIComponent(jql)}&startAt=${startAt}&maxResults=${PAGE_SIZE}&fields=${SEARCH_FIELDS}`,
-      );
+      const params = new URLSearchParams({
+        jql,
+        maxResults: String(PAGE_SIZE),
+        fields: SEARCH_FIELDS,
+      });
+      if (nextPageToken) {
+        params.set("nextPageToken", nextPageToken);
+      }
+      const data = await this.request(`/rest/api/3/search/jql?${params.toString()}`);
       issues.push(...(data.issues as JiraIssue[]));
-      if (startAt + data.maxResults >= data.total || data.issues.length === 0) {
+      if (data.isLast || !data.nextPageToken || data.issues.length === 0) {
         break;
       }
-      startAt += data.maxResults;
+      nextPageToken = data.nextPageToken;
     }
     return issues;
   }
@@ -195,7 +201,12 @@ export function mapJiraIssue(issue: JiraIssue, baseUrl: string): WorkItem {
     source: "jira",
     type: issue.fields.issuetype.name.toLowerCase() === "task" ? "task" : "issue",
     title: `[${issue.key}] ${issue.fields.summary}`,
-    body: issue.fields.description ?? "",
+    body:
+      typeof issue.fields.description === "string"
+        ? issue.fields.description
+        : issue.fields.description
+          ? JSON.stringify(issue.fields.description)
+          : "",
     author: issue.fields.reporter?.displayName ?? "unknown",
     timestamp: new Date(issue.fields.updated),
     priority: mapJiraPriority(issue.fields.priority?.name),

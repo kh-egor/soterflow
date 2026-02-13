@@ -80,8 +80,19 @@ export async function syncAll(
     stats.perSource[channel.name] = sourceStat;
 
     try {
-      await channel.connect();
-      const items = await channel.sync();
+      // 30s timeout per channel to prevent hanging
+      const syncWithTimeout = async () => {
+        await channel.connect();
+        const items = await channel.sync();
+        await channel.disconnect();
+        return items;
+      };
+      const items = await Promise.race([
+        syncWithTimeout(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`${channel.name} sync timed out after 30s`)), 30000),
+        ),
+      ]);
       sourceStat.total = items.length;
 
       for (const item of items) {
@@ -89,9 +100,13 @@ export async function syncAll(
       }
 
       updateSyncState(channel.name);
-      await channel.disconnect();
     } catch (err) {
       console.error(`[soterflow] Failed to sync ${channel.name}:`, err);
+      try {
+        await channel.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
   }
 

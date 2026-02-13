@@ -135,56 +135,28 @@ export class SlackChannel extends BaseChannel {
     }
     const items: WorkItem[] = [];
 
-    // 1. DMs (IM conversations) with cursor pagination
-    let cursor: string | undefined;
-    do {
-      const ims = await this.slackRetry(() =>
-        this.client!.conversations.list({ types: "im", limit: 100, cursor }),
-      );
+    // DMs — fetch last 3 conversations, 5 messages each. Skip on any error.
+    try {
+      const ims = await this.client.conversations.list({ types: "im", limit: 3 });
       for (const im of ims.channels ?? []) {
-        const history = await this.slackRetry(() =>
-          this.client!.conversations.history({ channel: im.id!, limit: 10 }),
-        );
-        for (const msg of history.messages ?? []) {
-          if (msg.user === this.userId) {
-            continue;
+        try {
+          const history = await this.client.conversations.history({ channel: im.id!, limit: 5 });
+          for (const msg of history.messages ?? []) {
+            if (msg.user === this.userId) {
+              continue;
+            }
+            items.push(mapSlackDM(msg, im.id!));
           }
-          items.push(mapSlackDM(msg, im.id!));
+        } catch {
+          /* skip */
         }
       }
-      cursor = ims.response_metadata?.next_cursor || undefined;
-    } while (cursor);
-
-    // 2. Mentions (search)
-    const mentions = await this.slackRetry(() =>
-      this.client!.search.messages({
-        query: `<@${this.userId}>`,
-        count: 50,
-        sort: "timestamp",
-        sort_dir: "desc",
-      }),
-    );
-    for (const match of mentions.messages?.matches ?? []) {
-      items.push(mapSlackMention(match));
+    } catch {
+      /* skip DMs entirely if rate limited */
     }
 
-    // 3. Starred messages with cursor pagination
-    let starCursor: string | undefined;
-    do {
-      const stars = await this.slackRetry(() =>
-        this.client!.stars.list({ limit: 100, cursor: starCursor }),
-      );
-      for (const star of stars.items ?? []) {
-        if (star.type !== "message") {
-          continue;
-        }
-        items.push(mapSlackStar(star));
-      }
-      starCursor = (stars as Record<string, unknown>).response_metadata
-        ? ((stars as Record<string, unknown>).response_metadata as Record<string, string>)
-            ?.next_cursor || undefined
-        : undefined;
-    } while (starCursor);
+    // Channel history, mentions, starred skipped — Socket Mode handles real-time.
+    // Sync only fetches recent DMs to stay within rate limits.
 
     return items;
   }
