@@ -355,6 +355,9 @@
           <div class="tab" data-source="slack">
             💬 Slack <span class="count" id="count-slack"></span>
           </div>
+          <div class="tab" data-source="gmail">
+            📧 Gmail <span class="count" id="count-gmail"></span>
+          </div>
         </div>
         <div id="inbox-list"><div class="loading">Loading...</div></div>
       </div>
@@ -515,7 +518,7 @@
       }
 
       function updateCounts() {
-        const counts = { all: allItems.length, github: 0, jira: 0, slack: 0 };
+        const counts = { all: allItems.length, github: 0, jira: 0, slack: 0, gmail: 0 };
         allItems.forEach((i) => {
           counts[i.source] = (counts[i.source] || 0) + 1;
         });
@@ -523,6 +526,7 @@
         document.getElementById("count-github").textContent = `(${counts.github})`;
         document.getElementById("count-jira").textContent = `(${counts.jira})`;
         document.getElementById("count-slack").textContent = `(${counts.slack})`;
+        document.getElementById("count-gmail").textContent = `(${counts.gmail})`;
         document.getElementById("inbox-header").textContent = `📥 SoterFlow (${counts.all})`;
       }
 
